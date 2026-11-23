@@ -37,6 +37,8 @@ export class Game {
   private readonly boots: THREE.Group[] = [];
   private readonly bikeBody = new THREE.Group();
   private readonly rider = new THREE.Group();
+  private upper!: THREE.Group;
+  private readonly upperHome = new THREE.Vector3();
   private readonly limbs: { thigh: THREE.Mesh; shin: THREE.Mesh; boot: THREE.Mesh; side: number }[] = [];
   private readonly wheels: THREE.Mesh[] = [];
   /** Camera perspectives, from far to close: the whole bike, the bike and biker, over the shoulder, first person. */
@@ -171,23 +173,28 @@ export class Game {
     this.rig.add(this.bikeBody);
 
     const jacket = mat(0x1f2f55), helmet = mat(0xe9e7e0), stripe = mat(0xc02a2a), jeans = mat(0x2f4a78), boots = mat(0x1a1a1c), glove = mat(0x222224), visor = mat(0x2a3440);
-    const R = this.rider;
-    box(0.46, 0.62, 0.3, jacket, 0, 1.28, -0.12, R).rotation.x = 0.32;      // torso leaning toward the bars
-    box(0.3, 0.3, 0.34, helmet, 0, 1.72, 0.0, R);                            // helmet
-    box(0.31, 0.06, 0.35, stripe, 0, 1.78, 0.0, R);
-    box(0.24, 0.1, 0.06, visor, 0, 1.7, 0.17, R);
-    box(0.34, 0.2, 0.28, jeans, 0, 0.98, -0.25, R);                          // hips on the seat
+    const R = new THREE.Group(); // upper body, hinged at the hips so it can lean over the planted foot
+    R.position.set(0, 0.98, -0.2);
+    this.rider.add(R);
+    this.upperHome.set(0, 0.98, -0.2);
+    const U = new THREE.Group(); U.position.set(0, -0.98, 0.2); R.add(U);
+    box(0.46, 0.62, 0.3, jacket, 0, 1.28, -0.12, U).rotation.x = 0.32;      // torso leaning toward the bars
+    box(0.3, 0.3, 0.34, helmet, 0, 1.72, 0.0, U);                            // helmet
+    box(0.31, 0.06, 0.35, stripe, 0, 1.78, 0.0, U);
+    box(0.24, 0.1, 0.06, visor, 0, 1.7, 0.17, U);
+    box(0.34, 0.2, 0.28, jeans, 0, 0.98, -0.25, U);                          // hips on the seat
     for (const side of [1, -1]) {
       // arms: shoulder -> bar grip (they follow the bars' general position)
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1, 0.12), jacket); R.add(arm);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1, 0.12), jacket); U.add(arm);
       Game.limb(arm, new THREE.Vector3(side * 0.27, 1.42, 0.0), new THREE.Vector3(side * 0.34, 1.07, 0.58));
-      box(0.14, 0.12, 0.16, glove, side * 0.34, 1.05, 0.62, R);
+      box(0.14, 0.12, 0.16, glove, side * 0.34, 1.05, 0.62, U);
       const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1, 0.18), jeans), shin = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1, 0.16), jeans);
       const boot = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.12, 0.34), boots);
-      R.add(thigh, shin, boot);
+      this.rider.add(thigh, shin, boot);
       this.limbs.push({ thigh, shin, boot, side });
     }
-    this.rig.add(R);
+    this.upper = R;
+    this.rig.add(this.rider);
   }
 
   resize(): void {
@@ -227,21 +234,24 @@ export class Game {
       if (b.foot !== 0) this.lastFoot = b.foot;
       const walking = b.footBoth, one = this.lastFoot === -l.side;
       const amt = b.footAmt * (walking || one ? 1 : 0);
-      H.set(l.side * 0.17, 0.98, -0.2);
-      // riding: knee against the tank, boot on the peg. one foot down: that boot reaches the ground just outside the bike.
-      // walking: both feet scuff the ground, one forward while the other pushes back.
-      K.set(l.side * (0.2 + 0.07 * amt), 0.86 - 0.08 * amt, 0.3 + 0.1 * amt);
+      H.set(l.side * 0.22, 0.98, -0.2);
+      // riding: an inverted L - the thigh runs forward to the knee beside the tank, the shin drops straight to the peg.
+      // one foot down: the shin slants out so the boot reaches the ground. walking: both feet scuff the ground.
+      K.set(l.side * (0.29 + 0.05 * amt), 0.95 - 0.07 * amt, 0.32 + 0.08 * amt);
       const ground = -b.y;
-      let fx = 0.2 + 0.14 * amt, fy = 0.3 * (1 - amt) + ground * amt, fz = 0.22 * amt;
+      let fx = 0.29 + 0.12 * amt, fy = 0.34 * (1 - amt) + ground * amt, fz = 0.32 - 0.1 * amt;
       if (walking) {
         const ph = b.walk + (l.side > 0 ? 0 : Math.PI);
-        fz = 0.05 + 0.4 * Math.sin(ph);
+        fz = 0.15 + 0.4 * Math.sin(ph);
         fy = ground + Math.max(0, Math.cos(ph)) * 0.16; // the swinging foot lifts
       }
       F.set(l.side * fx, fy, fz);
       Game.limb(l.thigh, H, K); Game.limb(l.shin, K, F);
       l.boot.position.set(F.x, F.y + 0.02, F.z + 0.1);
     }
+    // lean over the planted foot
+    const planted = b.footBoth ? 0 : this.lastFoot * b.footAmt;
+    this.upper.rotation.z += (planted * 0.42 - this.upper.rotation.z) * 0.25;
     A.set(0, 0, 0);
   }
 
@@ -253,7 +263,7 @@ export class Game {
     t.f.set(Math.sin(phi) * cp, sp, Math.cos(phi) * cp);
     t.r.set(-Math.cos(phi), 0, Math.sin(phi));
     // whole bike rolls with the lean...
-    const lean = b.lean + b.bal + b.tip;
+    const lean = b.lean + b.bal + b.tip + (b.footBoth ? 0 : this.lastFoot * b.footAmt * 0.1);
     t.up.set(0, Math.cos(lean), 0).addScaledVector(t.r, Math.sin(lean));
     t.left.crossVectors(t.up, t.f);
     t.up.crossVectors(t.f, t.left);

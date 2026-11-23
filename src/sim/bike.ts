@@ -123,7 +123,8 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   const support = footSupport(b.surface, under.h, (front.h - rear.h) / 1.4);
   const W = 1 - smoothstep(3.5, 7.5, b.v); // how much feet can do at this speed
   const vcap = Math.max(BIKE.vmax * feel.cap * stuck, th > 0 ? 3.2 * support : 0);
-  let a = th * BIKE.accel * Math.max(0, 1 - (b.v / vcap) ** 2);
+  const slipClutch = th > 0.1 && b.v < 2.8 ? 0.5 : 1; // a gentle pull-away while the feet are still down
+  let a = th * BIKE.accel * slipClutch * Math.max(0, 1 - (b.v / vcap) ** 2);
   if (b.v > 0.01) {
     a -= br * BIKE.brake + (th < 0.15 && br === 0 ? BIKE.coast : BIKE.rolling) + BIKE.drag * b.v * b.v;
     a -= feel.drag + Math.max(0, b.v - vcap) * 1.4;
@@ -157,7 +158,7 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   if (br > 0.5 && slip > 0) b.balV += noise * br * slip * b.v * 0.9 * dt;
   // feet: stopped = the rider's left foot is down (the usual one); crawling with the gas on = walking the bike with both feet;
   // otherwise one foot goes down on the side the bike is falling toward.
-  const walking = th > 0.1 && b.v < 3.4;
+  const walking = th > 0.1 && b.v < 2.8; // up to ~10 km/h the rider still pushes along with his feet
   const stopped = b.v < 1.2 && !walking;
   const dab = Math.abs(b.bal) > 0.1 && W > 0;
   b.footBoth = walking;
