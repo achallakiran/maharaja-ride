@@ -33,7 +33,7 @@ export const COLUMNS: readonly Col[] = (() => {
 
 // sRGB hex colours
 const TAR = 0x3d3f44, EDGE = 0xdcdad0, DIRT = 0x9a8664, DASH = 0xe3b92f;
-const KIND_HEX: Partial<Record<SurfaceKind, number>> = { broken: 0x5d5a55, pothole: 0x2e2a27, water: 0x4d5f64, mud: 0x6b5238, sand: 0xd2ba84 };
+const KIND_HEX: Partial<Record<SurfaceKind, number>> = { broken: 0x7b776e, pothole: 0x6a5238, water: 0x7f9aa0, mud: 0x6b5238, sand: 0xd2ba84 };
 const BUMP_A = 0xe8e4d8, BUMP_B = 0x2a2b2e;
 const ROW = 0.5;
 

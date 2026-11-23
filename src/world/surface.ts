@@ -43,8 +43,10 @@ export class RoadSurface {
 
   zoneAt(s: number): ZoneKind {
     const z = Math.floor(this.wrap(s) / ZONE_LEN);
+    if (z === 0) return 'broken'; // the start of the ride shows off what the roads are like
+    if (z === 1) return 'flooded';
     const r = hash2(z, 11);
-    return r < 0.38 ? 'good' : r < 0.68 ? 'broken' : r < 0.84 ? 'flooded' : 'sand';
+    return r < 0.2 ? 'good' : r < 0.55 ? 'broken' : r < 0.82 ? 'flooded' : 'sand';
   }
 
   private cell(k: number) {
@@ -52,14 +54,14 @@ export class RoadSurface {
     if (c) return c;
     const holes: Hole[] = [], ditches: Ditch[] = [], breakers: Breaker[] = [];
     const s0 = k * CELL, zone = this.zoneAt(s0 + CELL / 2);
-    const p = zone === 'broken' ? 0.5 : zone === 'flooded' ? 0.42 : zone === 'sand' ? 0.07 : 0.04;
-    for (let j = 0; j < 3; j++) {
-      const h = hash2(k * 5 + j, 21);
+    const p = zone === 'broken' ? 0.85 : zone === 'flooded' ? 0.8 : zone === 'sand' ? 0.12 : 0.05;
+    for (let j = 0; j < 4; j++) {
+      const h = hash2(k * 7 + j, 21);
       if (h > p) continue;
-      const a = hash2(k * 5 + j, 22), b = hash2(k * 5 + j, 23), c2 = hash2(k * 5 + j, 24);
-      holes.push({ s: s0 + a * CELL, d: -ROAD_HALF + b * 2 * ROAD_HALF, r: 0.5 + c2 * 0.7, depth: 0.05 + hash2(k * 5 + j, 25) * 0.11, water: zone === 'flooded' });
+      const a = hash2(k * 7 + j, 22), b = hash2(k * 7 + j, 23), c2 = hash2(k * 7 + j, 24);
+      holes.push({ s: s0 + a * CELL, d: -ROAD_HALF + b * 2 * ROAD_HALF, r: 0.7 + c2 * 1.1, depth: 0.09 + hash2(k * 7 + j, 25) * 0.17, water: zone === 'flooded' });
     }
-    if (zone === 'flooded' && hash2(k, 31) < 0.07) ditches.push({ s: s0 + hash2(k, 32) * CELL, len: 3 + hash2(k, 33) * 4, depth: 0.14 + hash2(k, 34) * 0.1 });
+    if ((zone === 'flooded' && hash2(k, 31) < 0.16) || (zone === 'broken' && hash2(k, 31) < 0.06)) ditches.push({ s: s0 + hash2(k, 32) * CELL, len: 4 + hash2(k, 33) * 6, depth: 0.16 + hash2(k, 34) * 0.14 });
     if (hash2(k, 41) < (zone === 'good' ? 0.018 : 0.012)) breakers.push({ s: s0 + hash2(k, 42) * CELL, len: 3.6, height: 0.09 });
     c = { holes, ditches, breakers };
     this.cells.set(k, c);
@@ -77,7 +79,7 @@ export class RoadSurface {
     let h = 0, kind: SurfaceKind = 'tar';
     if (zone === 'broken' || zone === 'flooded') {
       const n = hash2(Math.floor(sw / 1.5), Math.floor((d + 9) / 1.5) + 70);
-      if (n < (zone === 'broken' ? 0.35 : 0.2)) kind = 'broken';
+      if (n < (zone === 'broken' ? 0.55 : 0.4)) { kind = 'broken'; h = -0.045 * hash2(Math.floor(sw / 0.5), Math.floor((d + 9) / 0.5) + 300); }
     } else if (zone === 'sand') {
       const drift = 1.4 + 2.4 * hash2(Math.floor(sw / 5), 91) * (0.4 + 0.6 * smooth(((sw / 5) % 1)));
       if (d < -ROAD_HALF + drift) kind = 'sand';
