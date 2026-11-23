@@ -30,7 +30,7 @@ export type Ground = (s: number, d: number) => { h: number; kind: SurfaceKind };
 const FLAT: Ground = () => ({ h: 0, kind: 'tar' });
 
 export const BIKE = {
-  vmax: 24,          // m/s, about 86 km/h
+  vmax: 21,          // m/s, about 76 km/h
   accel: 5.4,        // m/s^2 at launch
   brake: 10.5,
   rolling: 0.18,
@@ -63,7 +63,7 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
     a -= br * BIKE.brake + BIKE.rolling + BIKE.drag * b.v * b.v;
     a -= feel.drag + Math.max(0, b.v - vcap) * 1.4;
     // dropping into / climbing out of a hole costs speed
-    a -= Math.min(6, Math.abs(front.h - rear.h) / 1.4 * b.v * 1.4);
+    a -= Math.min(22, Math.abs(front.h - rear.h) / 1.4 * b.v * 4);
   }
   b.v = Math.max(0, b.v + a * dt);
   if (br > 0 && b.v < 0.05) b.v = 0;

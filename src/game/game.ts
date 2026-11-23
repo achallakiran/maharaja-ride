@@ -60,7 +60,7 @@ export class Game {
     this.sky = this.makeSky();
     this.scene.add(this.sky);
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x8c8168 }));
-    this.ground.position.y = -0.9;
+    this.ground.position.y = -2;
     this.scene.add(this.ground);
 
     this.stream = new RoadStream(this.loop);
@@ -159,7 +159,7 @@ export class Game {
     const fov = 70 + (b.v / 24) * 9;
     if (Math.abs(fov - this.fov) > 0.05) { this.fov = fov; this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
 
-    this.ground.position.set(px, -0.9, pz);
+    this.ground.position.set(px, -2, pz);
     this.sky.position.copy(t.eye);
     this.sun.position.set(px - 80, 120, pz + 50);
     this.sun.target.position.set(px, 0, pz);
