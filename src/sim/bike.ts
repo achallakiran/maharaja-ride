@@ -5,6 +5,8 @@
 //   d'   = v sin(psi)
 //   psi' = yawRate - kappa s'        (kappa > 0 when the road turns right)
 
+import { SURFACE_FEEL, type SurfaceKind } from '../world/surface.ts';
+
 export interface BikeInput { steer: number; throttle: number; brake: number; horn: boolean }
 
 export interface BikeState {
@@ -16,8 +18,16 @@ export interface BikeState {
   yawRate: number; // rad/s, + = turning right
   lean: number;    // rad, + = leaning right
   odo: number;     // total distance ridden, m
-  surface: 'tar' | 'shoulder';
+  surface: SurfaceKind;
+  y: number;       // sprung body height above the road datum, m
+  yv: number;      // its vertical speed
+  pitch: number;   // rad, + = nose up
+  hit: number;     // 0..1 how hard the last bump was (for sound / shake)
 }
+
+/** Road under the wheels: height and material at (s, d). */
+export type Ground = (s: number, d: number) => { h: number; kind: SurfaceKind };
+const FLAT: Ground = () => ({ h: 0, kind: 'tar' });
 
 export const BIKE = {
   vmax: 24,          // m/s, about 86 km/h
@@ -34,21 +44,25 @@ export const BIKE = {
 } as const;
 
 export function newBike(s = 0): BikeState {
-  return { s, d: 0, psi: 0, v: 0, steer: 0, yawRate: 0, lean: 0, odo: 0, surface: 'tar' };
+  return { s, d: 0, psi: 0, v: 0, steer: 0, yawRate: 0, lean: 0, odo: 0, surface: 'tar', y: 0, yv: 0, pitch: 0, hit: 0 };
 }
 
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
 
-export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) => number, length: number, dt: number): void {
+export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) => number, length: number, dt: number, ground: Ground = FLAT): void {
   const th = clamp(input.throttle, 0, 1), br = clamp(input.brake, 0, 1), st = clamp(input.steer, -1, 1);
   const onShoulder = Math.abs(b.d) > BIKE.shoulderStart;
-  b.surface = onShoulder ? 'shoulder' : 'tar';
+  const under = ground(b.s, b.d), front = ground(b.s + 0.7, b.d), rear = ground(b.s - 0.7, b.d);
+  b.surface = onShoulder && under.kind === 'tar' ? 'shoulder' : under.kind;
+  const feel = SURFACE_FEEL[b.surface];
 
   // --- speed
   let a = th * BIKE.accel * Math.max(0, 1 - (b.v / BIKE.vmax) ** 2);
   if (b.v > 0.01) {
     a -= br * BIKE.brake + BIKE.rolling + BIKE.drag * b.v * b.v;
-    if (onShoulder) a -= BIKE.shoulderDrag;
+    a -= feel.drag;
+    // dropping into / climbing out of a hole costs speed
+    a -= Math.min(6, Math.abs(front.h - rear.h) / 1.4 * b.v * 1.4);
   }
   b.v = Math.max(0, b.v + a * dt);
   if (br > 0 && b.v < 0.05) b.v = 0;
@@ -65,7 +79,7 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   // steering can only angle the bike so far off the road direction (a lane change, not a spin-out)
   const into = Math.sign(b.steer) * b.psi;
   const room = into > 0 ? clamp(1 - into / BIKE.maxAngle, 0, 1) : 1;
-  const target = b.steer * authority * room + kappa * sdotPre - 0.9 * settle * b.psi * Math.min(1, b.v / 3);
+  const target = b.steer * authority * room * feel.grip + kappa * sdotPre - 0.9 * settle * b.psi * Math.min(1, b.v / 3);
   b.yawRate += (target - b.yawRate) * Math.min(1, dt * 10);
   const leanTarget = clamp(Math.atan((b.v * b.yawRate) / 9.81), -BIKE.maxLean, BIKE.maxLean);
   b.lean += (leanTarget - b.lean) * Math.min(1, dt * 7);
@@ -78,6 +92,15 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   b.psi = clamp(b.psi, -1.45, 1.45);
   b.s = (((b.s + sdot * dt) % length) + length) % length;
   b.odo += b.v * dt;
+
+  // --- suspension: body rides on a damped spring above the average wheel height
+  const wheelY = (front.h + rear.h) / 2, pitchT = Math.atan2(front.h - rear.h, 1.4);
+  const k = 190, cd = 26;
+  const acc = -k * (b.y - wheelY) - cd * b.yv;
+  b.yv += acc * dt;
+  b.y += b.yv * dt;
+  b.pitch += (pitchT - b.pitch) * Math.min(1, dt * 14);
+  b.hit = Math.max(Math.min(1, Math.abs(acc) / 90), b.hit * Math.exp(-6 * dt));
 
   // --- road edge: stop at the limit and scrub speed
   if (Math.abs(b.d) > BIKE.edge) {

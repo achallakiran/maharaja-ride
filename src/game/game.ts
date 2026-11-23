@@ -6,6 +6,7 @@ import { newBike, stepBike, kmh, type BikeInput, type BikeState } from '../sim/b
 import { newEngine, stepEngine, type EngineState } from '../audio/engine-model.ts';
 import { FixedStepper } from '../sim/stepper.ts';
 import { FrameStats } from '../sim/frame-stats.ts';
+import { roadSurface } from '../world/surface.ts';
 import { RoadStream } from '../render/road-stream.ts';
 import { linearPalette, toGeometry } from '../render/vehicle-fleet.ts';
 import { meshVoxels } from '../voxel/mesher.ts';
@@ -38,6 +39,7 @@ export class Game {
   private readonly sun: THREE.DirectionalLight;
   private readonly canvas: HTMLCanvasElement;
   private fov = 72;
+  private readonly surface = roadSurface(this.loop);
   private lastInput: BikeInput = { steer: 0, throttle: 0, brake: 0, horn: false };
   private readonly v = { f: new THREE.Vector3(), r: new THREE.Vector3(), up: new THREE.Vector3(), left: new THREE.Vector3(), tmp: new THREE.Vector3(), eye: new THREE.Vector3(), fc: new THREE.Vector3(), rc: new THREE.Vector3(), upc: new THREE.Vector3() };
 
@@ -58,7 +60,7 @@ export class Game {
     this.sky = this.makeSky();
     this.scene.add(this.sky);
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x8c8168 }));
-    this.ground.position.y = -0.05;
+    this.ground.position.y = -0.3;
     this.scene.add(this.ground);
 
     this.stream = new RoadStream(this.loop);
@@ -118,7 +120,7 @@ export class Game {
     this.stats.push(dt);
     this.lastInput = input;
     this.stepper.advance(dt, step => {
-      stepBike(this.bike, input, s => this.loop.kappaAt(s), this.loop.length, step);
+      stepBike(this.bike, input, s => this.loop.kappaAt(s), this.loop.length, step, (s, d) => this.surface.sample(s, d));
       stepEngine(this.engine, this.bike.v, input.throttle, step);
     });
     this.stream.update(this.bike.s);
@@ -131,12 +133,14 @@ export class Game {
     const b = this.bike, r = this.loop.sample(b.s), t = this.v;
     const px = r.x - r.fz * b.d, pz = r.z + r.fx * b.d;
     const phi = Math.atan2(r.fx, r.fz) - b.psi;
-    t.f.set(Math.sin(phi), 0, Math.cos(phi));
+    const cp = Math.cos(b.pitch), sp = Math.sin(b.pitch);
+    t.f.set(Math.sin(phi) * cp, sp, Math.cos(phi) * cp);
     t.r.set(-Math.cos(phi), 0, Math.sin(phi));
     // whole bike rolls with the lean...
     t.up.set(0, Math.cos(b.lean), 0).addScaledVector(t.r, Math.sin(b.lean));
     t.left.crossVectors(t.up, t.f);
-    this.rig.matrix.makeBasis(t.left, t.up, t.f).setPosition(px, 0, pz);
+    t.up.crossVectors(t.f, t.left);
+    this.rig.matrix.makeBasis(t.left, t.up, t.f).setPosition(px, b.y, pz);
     this.rig.matrixWorldNeedsUpdate = true;
     this.bars.rotation.y = -b.steer * 0.38;
 
@@ -145,17 +149,17 @@ export class Game {
     t.fc.set(Math.sin(phiC), 0, Math.cos(phiC));
     t.rc.set(-Math.cos(phiC), 0, Math.sin(phiC));
     t.upc.set(0, Math.cos(b.lean * 0.5), 0).addScaledVector(t.rc, Math.sin(b.lean * 0.5));
-    t.eye.set(px, 0, pz).addScaledVector(t.upc, EYE_HEIGHT);
-    t.eye.y += Math.sin(b.odo * 2.3) * 0.004 * (b.v / 20) + Math.sin(b.odo * 5.1) * 0.0025 * (b.v / 20);
+    t.eye.set(px, b.y, pz).addScaledVector(t.upc, EYE_HEIGHT);
+    t.eye.y += Math.sin(b.odo * 2.3) * 0.004 * (b.v / 20) + Math.sin(b.odo * 5.1) * 0.0025 * (b.v / 20) + b.hit * 0.03 * Math.sin(b.odo * 23);
     this.camera.position.copy(t.eye);
     this.camera.up.copy(t.upc);
     t.tmp.copy(t.eye).addScaledVector(t.fc, 20);
-    t.tmp.y -= 1.0;
+    t.tmp.y -= 1.0 - b.pitch * 12;
     this.camera.lookAt(t.tmp);
     const fov = 70 + (b.v / 24) * 9;
     if (Math.abs(fov - this.fov) > 0.05) { this.fov = fov; this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
 
-    this.ground.position.set(px, -0.05, pz);
+    this.ground.position.set(px, -0.3, pz);
     this.sky.position.copy(t.eye);
     this.sun.position.set(px - 80, 120, pz + 50);
     this.sun.target.position.set(px, 0, pz);

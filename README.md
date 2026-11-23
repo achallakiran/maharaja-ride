@@ -33,3 +33,6 @@ tests/       node unit tests + headless smoke test
 
 ## Phase 1 status: ride the empty loop
 First-person bike on the Utopia ↔ Aquamarine loop (left carriageway, U-turns at both ends): road streaming, arcade bike physics, cockpit with mirrors and lean, joystick + gas/brake/horn, engine sound. Spike still at `?spike=1`.
+
+## Phase 2 status: broken roads
+The loop is cut into 400 m zones: good tar, broken tar, flooded (water-filled potholes, cross-road ditches, mud shoulders) and sandy (drifts over the left lane). Speed breakers appear anywhere. The road mesh has real depth (0.5 m cells, normals from the height field) and the bike has a sprung body: bumps jolt the camera and tilt the nose, mud/sand/water slow you and cut steering grip.

@@ -420,3 +420,44 @@ test('props: post, lamp and both trees are single connected pieces with sane siz
     assert.ok(h >= minH && h <= maxH, `${name} height ${h}`);
   }
 });
+
+// ---------------------------------------------------------------- Phase 2: road surface
+import { roadSurface, ZONE_LEN, SURFACE_FEEL } from '../src/world/surface.ts';
+
+test('surface: deterministic, finite, mixture of zones and features', () => {
+  const loop = bangaloreLoop(), a = roadSurface(loop), b = new (a.constructor as new (l: typeof loop) => typeof a)(loop);
+  const zones = new Set<string>(), kinds = new Set<string>();
+  let minH = 0, maxH = 0;
+  for (let s = 0; s < loop.length; s += 0.7) for (let d = -8; d <= 8; d += 1.1) {
+    const x = a.sample(s, d), y = b.sample(s, d);
+    assert.equal(x.h, y.h); assert.equal(x.kind, y.kind);
+    assert.ok(Number.isFinite(x.h));
+    kinds.add(x.kind); minH = Math.min(minH, x.h); maxH = Math.max(maxH, x.h);
+  }
+  for (let z = 0; z * ZONE_LEN < loop.length; z++) zones.add(a.zoneAt(z * ZONE_LEN + 1));
+  assert.equal(zones.size, 4, 'all four zone kinds appear');
+  for (const k of ['tar', 'broken', 'pothole', 'water', 'mud', 'sand', 'bump', 'shoulder']) assert.ok(kinds.has(k), `has ${k}`);
+  assert.ok(minH > -0.4 && minH < -0.08, `deepest ${minH}`);
+  assert.ok(maxH > 0.05 && maxH < 0.15, `tallest ${maxH}`);
+  assert.ok(SURFACE_FEEL.mud.drag > SURFACE_FEEL.tar.drag);
+});
+
+test('surface: smooth enough to ride (no cliffs between neighbouring samples)', () => {
+  const loop = bangaloreLoop(), a = roadSurface(loop);
+  let worst = 0;
+  for (let s = 100; s < 6000; s += 0.25) for (let d = -5; d <= 5; d += 0.5) worst = Math.max(worst, Math.abs(a.height(s + 0.25, d) - a.height(s, d)));
+  assert.ok(worst < 0.12, `step ${worst}`);
+});
+
+test('bike: potholes and breakers move the suspension and cost speed', () => {
+  const loop = bangaloreLoop(), surf = roadSurface(loop);
+  // find a speed breaker
+  let sb = -1;
+  for (let s = 200; s < loop.length && sb < 0; s += 0.5) if (surf.sample(s, 0).kind === 'bump' && Math.abs(loop.kappaAt(s)) < 0.002) sb = s;
+  assert.ok(sb > 0, 'found a breaker');
+  const b = newBike(sb - 30); b.v = 12;
+  let amp = 0;
+  for (let i = 0; i < 60 * 5; i++) { stepBike(b, { ...IDLE, throttle: 0.5 }, s => loop.kappaAt(s), loop.length, 1 / 60, (s, d) => surf.sample(s, d)); amp = Math.max(amp, Math.abs(b.y)); }
+  assert.ok(amp > 0.03 && amp < 0.2, `suspension travel ${amp}`);
+  assert.ok(Math.abs(b.y) < 0.02, 'settles after');
+});
