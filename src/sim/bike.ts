@@ -57,10 +57,11 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   const feel = SURFACE_FEEL[b.surface];
 
   // --- speed
-  let a = th * BIKE.accel * Math.max(0, 1 - (b.v / BIKE.vmax) ** 2);
+  const vcap = BIKE.vmax * feel.cap;
+  let a = th * BIKE.accel * Math.max(0, 1 - (b.v / vcap) ** 2);
   if (b.v > 0.01) {
     a -= br * BIKE.brake + BIKE.rolling + BIKE.drag * b.v * b.v;
-    a -= feel.drag;
+    a -= feel.drag + Math.max(0, b.v - vcap) * 1.4;
     // dropping into / climbing out of a hole costs speed
     a -= Math.min(6, Math.abs(front.h - rear.h) / 1.4 * b.v * 1.4);
   }
