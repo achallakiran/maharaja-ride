@@ -65,7 +65,7 @@ export class RoadSurface {
       const a = hash2(k * 7 + j, 22), b = hash2(k * 7 + j, 23), c2 = hash2(k * 7 + j, 24);
       holes.push({ s: s0 + a * CELL, d: -ROAD_HALF + b * 2 * ROAD_HALF, r: 0.7 + c2 * 1.1, depth: 0.09 + hash2(k * 7 + j, 25) * 0.17, water: zone === 'flooded' });
     }
-    if ((zone === 'flooded' && hash2(k, 31) < 0.2) || (zone === 'broken' && hash2(k, 31) < 0.1) || k === 28) ditches.push({ s: s0 + hash2(k, 32) * CELL, ...(k === 28 || hash2(k, 35) < 0.22 ? { len: 6 + hash2(k, 33) * 4, depth: 0.8 + hash2(k, 34) * 0.5 } : hash2(k, 35) < 0.45 ? { len: 9 + hash2(k, 33) * 8, depth: 0.35 + hash2(k, 34) * 0.25 } : { len: 4 + hash2(k, 33) * 6, depth: 0.16 + hash2(k, 34) * 0.14 }) });
+    if ((zone === 'flooded' && hash2(k, 31) < 0.2) || (zone === 'broken' && hash2(k, 31) < 0.1)) ditches.push({ s: s0 + hash2(k, 32) * CELL, len: 3 + hash2(k, 33) * 3, depth: 0.1 + hash2(k, 34) * 0.1 });
     if (hash2(k, 41) < (zone === 'good' ? 0.018 : 0.012)) breakers.push({ s: s0 + hash2(k, 42) * CELL, len: 3.6, height: 0.09 });
     // sudden damage with no warning: small sharp holes (hidden under puddles when flooded) and sunken slabs with a hard edge
     const rough = zone === 'broken' || zone === 'flooded';

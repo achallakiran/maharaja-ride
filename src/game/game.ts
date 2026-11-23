@@ -15,7 +15,7 @@ import { K } from '../voxel/vehicles.ts';
 import type { RideAudio } from '../audio/audio.ts';
 
 export const START_S = 150;
-const EYE_HEIGHT = 1.30;
+const EYE_HEIGHT = 1.62;
 const TANK_PAINT = 0x8c1d2b; // royal maroon
 
 export interface RideInfo { kmh: number; km: number; place: string; s: number; d: number; fps: number; chunks: number }
@@ -192,7 +192,7 @@ export class Game {
     this.camera.position.copy(t.eye);
     this.camera.up.copy(t.upc);
     t.tmp.copy(t.eye).addScaledVector(t.fc, 20);
-    t.tmp.y -= 1.0 - b.pitch * 12;
+    t.tmp.y -= 1.9 - b.pitch * 12;
     this.camera.lookAt(t.tmp);
     const fov = 70 + (b.v / 24) * 9;
     if (Math.abs(fov - this.fov) > 0.05) { this.fov = fov; this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
