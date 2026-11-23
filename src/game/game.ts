@@ -115,9 +115,9 @@ export class Game {
     const denim = new THREE.MeshLambertMaterial({ color: 0x2f4a78 }), leather = new THREE.MeshLambertMaterial({ color: 0x1b1b1d }), sole = new THREE.MeshLambertMaterial({ color: 0x3a3a3c });
     for (const side of [1, -1]) {
       const g = new THREE.Group();
-      const shin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.17), denim); shin.position.set(0, 0.28, 0);
-      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.17, 0.34), leather); boot.position.set(0, 0.02, 0.07);
-      const sl = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.04, 0.36), sole); sl.position.set(0, -0.08, 0.07);
+      const shin = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.62, 0.22), denim); shin.position.set(0, 0.36, 0);
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.2, 0.42), leather); boot.position.set(0, 0.02, 0.07);
+      const sl = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.05, 0.44), sole); sl.position.set(0, -0.08, 0.07);
       g.add(shin, boot, sl);
       g.userData.side = side;
       g.visible = false;
@@ -176,9 +176,9 @@ export class Game {
       if (b.foot !== 0) this.lastFoot = b.foot;
       const amt = b.footAmt * (both || this.lastFoot === -side ? 1 : 0);
       g.visible = amt > 0.03;
-      const out = 0.55 + (both ? 0 : 0.1);
-      g.position.set(side * out, 0.18 - (1 - amt) * 0.7 - b.y + (b.fallT > 0 ? 0.3 : 0), 0.62 * amt - 0.7 * (1 - amt));
-      g.rotation.set(0, side * -0.12, side * -0.18 * amt);
+      // stylised: the planted leg reaches out ahead and to the side so it is in the lower corner of the view
+      g.position.set(side * (0.5 + 0.35 * amt), -0.5 + 1.0 * amt, -0.7 + 1.75 * amt);
+      g.rotation.set(0.25 * amt, side * -0.25, side * -0.5 * amt);
     }
 
     // ...the rider's head leans only half as much and looks into the turn
