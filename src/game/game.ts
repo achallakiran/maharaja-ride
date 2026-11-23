@@ -15,6 +15,9 @@ import { K } from '../voxel/vehicles.ts';
 import type { RideAudio } from '../audio/audio.ts';
 
 export const START_S = 150;
+/** How much each surface shakes the view and the bars. */
+const ROUGH: Record<string, number> = { broken: 0.5, pothole: 0.9, crack: 0.9, water: 0.35, mud: 0.55, sand: 0.3, shoulder: 0.5, bump: 0.5 };
+const smoothstep = (a: number, c: number, x: number) => { const t = clamp((x - a) / (c - a), 0, 1); return t * t * (3 - 2 * t); };
 const EYE_HEIGHT = 1.62;
 const TANK_PAINT = 0x8c1d2b; // royal maroon
 
@@ -194,7 +197,8 @@ export class Game {
       this.limbs.push({ thigh, shin, boot, side });
     }
     this.upper = R;
-    this.rig.add(this.rider);
+    this.rider.matrixAutoUpdate = false;
+    this.scene.add(this.rider);
   }
 
   resize(): void {
@@ -222,8 +226,42 @@ export class Game {
     if (down && !this.footPrev) { this.audio?.foot(b.surface); this.buzz(18); }
     this.footPrev = down;
     if (b.falls !== this.fallsPrev) { this.fallsPrev = b.falls; this.buzz(180); }
-    if (Math.abs(b.wob) > 0.15 && performance.now() - this.vibeAt > 140) { this.vibeAt = performance.now(); this.buzz(10); }
+    if ((ROUGH[b.surface] ?? 0) > 0.4 && b.v > 6 && performance.now() - this.vibeAt > 160) { this.vibeAt = performance.now(); this.buzz(8); }
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** voxel-bike's fall: the rider is thrown clear and tumbles, lies there, gets up, runs back to the bike and swings back on. */
+  private poseFall(r: { fx: number; fz: number }, px: number, pz: number, phi: number): void {
+    const b = this.bike, age = b.fallT, e = (a: number, c: number) => smoothstep(a, c, age);
+    const side = b.fallDir; // +1 = bike went down to the right
+    const separate = e(0, 0.18), tumble = clamp(age / 0.86, 0, 1), standing = e(1.02, 1.39), mount = e(2.64, 2.85);
+    const run = clamp((age - 1.39) / 1.1, 0, 1), runT = run * run * (3 - 2 * run);
+    const travel = e(0.04, 0.88) * (1 - runT);
+    const roll = age < 0.86 ? Math.PI * 2.5 * e(0.06, 0.86) : (Math.PI / 2) * (1 - e(1.02, 1.39));
+    const arc = Math.sin(tumble * Math.PI) * 0.52;
+    const stride = e(1.39, 1.51) * (1 - e(2.31, 2.49));
+    const bob = Math.abs(Math.sin((age - 1.39) * Math.PI * 8.5)) * stride * 0.08;
+    // bike-local offsets: ahead of the bike and out to the side the bike fell on
+    const fwd = 3.25 * travel, lat = -side * 1.26 * travel;
+    const sy = Math.sin(phi), cy = Math.cos(phi);
+    const wx = px + sy * fwd, wz = pz + cy * fwd;
+    // left of the bike in world = (cos phi, -sin phi) (rider's +x)
+    const lx = cy, lz = -sy;
+    const cxw = wx + lx * lat, czw = wz + lz * lat;
+    const gy = this.surface.height(b.s + fwd, b.d) ;
+    const lying = (1 - standing) * 0.32 + standing * 0.9;
+    const center = new THREE.Vector3(cxw, Math.max(gy, 0) + lying + arc + bob, czw);
+    const toBike = Math.atan2(px - cxw, pz - czw);
+    const heading = phi + Math.atan2(Math.sin(toBike - phi), Math.cos(toBike - phi)) * e(1.1, 1.39) * (1 - mount) * (run > 0 ? 1 : 0);
+    const free = new THREE.Matrix4().compose(center, new THREE.Quaternion().setFromEuler(new THREE.Euler(roll, heading, side * -0.34 * (1 - standing), 'YXZ')), new THREE.Vector3(1, 1, 1));
+    free.multiply(new THREE.Matrix4().makeTranslation(0, -0.9, 0));
+    // blend between "on the bike" and "free" at the start (separate) and end (mount)
+    const w = separate * (1 - mount);
+    const pa = new THREE.Vector3(), qa = new THREE.Quaternion(), sa = new THREE.Vector3(), pb = new THREE.Vector3(), qb = new THREE.Quaternion(), sb = new THREE.Vector3();
+    this.rig.matrix.decompose(pa, qa, sa); free.decompose(pb, qb, sb);
+    pa.lerp(pb, w); qa.slerp(qb, w);
+    this.rider.matrix.compose(pa, qa, new THREE.Vector3(1, 1, 1));
+    void r;
   }
 
   private poseRider(): void {
@@ -232,8 +270,9 @@ export class Game {
     for (const w of this.wheels) w.rotation.x = b.odo / 0.34;
     for (const l of this.limbs) {
       if (b.foot !== 0) this.lastFoot = b.foot;
-      const walking = b.footBoth, one = this.lastFoot === -l.side;
-      const amt = b.footAmt * (walking || one ? 1 : 0);
+      const age = b.fallT, running = age > 1.39 && age < 2.49;
+      const walking = b.footBoth || running, one = this.lastFoot === -l.side;
+      const amt = running ? 1 : b.footAmt * (walking || one ? 1 : 0);
       H.set(l.side * 0.22, 0.98, -0.2);
       // riding: an inverted L - the thigh runs forward to the knee beside the tank, the shin drops straight to the peg.
       // one foot down: the shin slants out so the boot reaches the ground. walking: both feet scuff the ground.
@@ -241,7 +280,7 @@ export class Game {
       const ground = -b.y;
       let fx = 0.29 + 0.12 * amt, fy = 0.34 * (1 - amt) + ground * amt, fz = 0.32 - 0.1 * amt;
       if (walking) {
-        const ph = b.walk + (l.side > 0 ? 0 : Math.PI);
+        const ph = (running ? (age - 1.39) * Math.PI * 8.5 : b.walk) + (l.side > 0 ? 0 : Math.PI);
         fz = 0.15 + 0.4 * Math.sin(ph);
         fy = ground + Math.max(0, Math.cos(ph)) * 0.16; // the swinging foot lifts
       }
@@ -250,7 +289,7 @@ export class Game {
       l.boot.position.set(F.x, F.y + 0.02, F.z + 0.1);
     }
     // lean over the planted foot
-    const planted = b.footBoth ? 0 : this.lastFoot * b.footAmt;
+    const planted = b.footBoth || b.fallT > 0 ? 0 : this.lastFoot * b.footAmt;
     this.upper.rotation.z += (planted * 0.42 - this.upper.rotation.z) * 0.25;
     A.set(0, 0, 0);
   }
@@ -263,16 +302,17 @@ export class Game {
     t.f.set(Math.sin(phi) * cp, sp, Math.cos(phi) * cp);
     t.r.set(-Math.cos(phi), 0, Math.sin(phi));
     // whole bike rolls with the lean...
-    const lean = b.lean + b.bal + b.tip + (b.footBoth ? 0 : this.lastFoot * b.footAmt * 0.1);
+    const lean = b.lean + b.tip + (b.footBoth ? 0 : this.lastFoot * b.footAmt * 0.1);
     t.up.set(0, Math.cos(lean), 0).addScaledVector(t.r, Math.sin(lean));
     t.left.crossVectors(t.up, t.f);
     t.up.crossVectors(t.f, t.left);
     this.rig.matrix.makeBasis(t.left, t.up, t.f).setPosition(px, b.y, pz);
     this.rig.matrixWorldNeedsUpdate = true;
-    this.bars.rotation.y = -(b.steer + b.wob * 0.9) * 0.38;
-    const chase = this.view !== 'rider';
+    const shake = (ROUGH[b.surface] ?? 0) * Math.min(1, b.v / 14);
+    this.bars.rotation.y = -b.steer * 0.38 + Math.sin(b.odo * 29) * 0.05 * shake;
+    const chase = this.view !== 'rider' || b.fallT > 0;
     this.bikeBody.visible = this.rider.visible = chase;
-    if (chase) this.poseRider();
+    if (chase) { this.poseRider(); if (b.fallT > 0) this.poseFall(r, px, pz, phi); else this.rider.matrix.copy(this.rig.matrix); }
     for (const g of this.boots) {
       const side = g.userData.side as number; // +1 = left of the rider
       const both = b.footBoth;
@@ -288,14 +328,14 @@ export class Game {
     const phiC = phi - clamp(b.yawRate * 0.16, -0.22, 0.22);
     t.fc.set(Math.sin(phiC), 0, Math.cos(phiC));
     t.rc.set(-Math.cos(phiC), 0, Math.sin(phiC));
-    const camLean = b.lean * 0.5 + b.bal * 0.7 + b.tip * 0.9 + this.lastFoot * 0.05 * b.footAmt;
+    const camLean = b.lean * 0.5 + b.tip * 0.5 + this.lastFoot * 0.05 * b.footAmt;
     t.upc.set(0, Math.cos(camLean), 0).addScaledVector(t.rc, Math.sin(camLean));
     t.eye.set(px, b.y * 1.5 - 0.07 * b.footAmt - Math.abs(b.tip) * 0.35, pz).addScaledVector(t.upc, EYE_HEIGHT);
-    t.eye.y += Math.sin(b.odo * 2.3) * 0.004 * (b.v / 20) + Math.sin(b.odo * 5.1) * 0.0025 * (b.v / 20) + b.hit * 0.03 * Math.sin(b.odo * 23);
+    t.eye.y += Math.sin(b.odo * 2.3) * 0.004 * (b.v / 20) + Math.sin(b.odo * 5.1) * 0.0025 * (b.v / 20) + b.hit * 0.03 * Math.sin(b.odo * 23) + shake * 0.02 * Math.sin(b.odo * 41);
     if (chase) {
       // above and behind the rider; leans a little with the bike, lags a little into turns
-      const cam = { far: { back: 3.9, up: 2.6, look: 0.7, ahead: 5 }, mid: { back: 2.6, up: 1.95, look: 0.9, ahead: 5 }, close: { back: 1.8, up: 1.9, look: 1.0, ahead: 5 } }[this.view as 'far' | 'mid' | 'close'];
-      const cl = b.lean * 0.45 + b.bal * 0.6 + b.tip * 0.8;
+      const cam = { far: { back: 3.9, up: 2.6, look: 0.7, ahead: 5 }, mid: { back: 2.6, up: 1.95, look: 0.9, ahead: 5 }, close: { back: 1.8, up: 1.9, look: 1.0, ahead: 5 } }[(this.view === 'rider' ? 'mid' : this.view) as 'far' | 'mid' | 'close'];
+      const cl = b.lean * 0.45 + b.tip * 0.2;
       t.upc.set(0, Math.cos(cl), 0).addScaledVector(t.rc, Math.sin(cl));
       t.eye.set(px, b.y * 0.8, pz).addScaledVector(t.fc, -cam.back - b.v * 0.015).addScaledVector(t.upc, cam.up).addScaledVector(t.rc, -Math.sin(b.lean) * 0.4);
       t.eye.y += b.hit * 0.03 * Math.sin(b.odo * 23);

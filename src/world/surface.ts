@@ -24,14 +24,14 @@ export interface Slab { s: number; len: number; d1: number; drop: number }
 /** Per-kind handling: extra deceleration (m/s^2), steering grip multiplier and top-speed cap (fraction of vmax). */
 export const SURFACE_FEEL: Record<SurfaceKind, { drag: number; grip: number; cap: number }> = {
   tar: { drag: 0, grip: 1, cap: 1 },
-  broken: { drag: 0.4, grip: 0.95, cap: 0.55 },
-  pothole: { drag: 1.5, grip: 0.85, cap: 0.5 },
-  crack: { drag: 1.2, grip: 0.8, cap: 0.5 },
-  water: { drag: 2, grip: 0.7, cap: 0.4 },
-  mud: { drag: 2.5, grip: 0.65, cap: 0.35 },
-  sand: { drag: 1.2, grip: 0.8, cap: 0.5 },
-  bump: { drag: 1, grip: 1, cap: 0.5 },
-  shoulder: { drag: 2, grip: 0.85, cap: 0.55 },
+  broken: { drag: 0.3, grip: 0.95, cap: 0.8 },
+  pothole: { drag: 0.8, grip: 0.9, cap: 0.6 },
+  crack: { drag: 0.8, grip: 0.9, cap: 0.6 },
+  water: { drag: 1.2, grip: 0.8, cap: 0.55 },
+  mud: { drag: 1.6, grip: 0.7, cap: 0.5 },
+  sand: { drag: 0.8, grip: 0.8, cap: 0.6 },
+  bump: { drag: 0.3, grip: 1, cap: 0.7 },
+  shoulder: { drag: 1, grip: 0.9, cap: 0.65 },
 };
 
 const smooth = (t: number) => t * t * (3 - 2 * t);

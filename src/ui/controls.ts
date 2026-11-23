@@ -15,9 +15,11 @@ const KEYS = {
 export class Controls {
   private readonly els: ControlEls;
   private readonly keys = new Set<string>();
-  private stick = 0;
+  private stick = 0;   // left / right, -1..1
+  private stickY = 0;  // forward / back, -1..1 (+ = pushed forward)
   private stickPid: number | null = null;
   private cx = 0;
+  private cy = 0;
   private radius = 56;
   private readonly held = { gas: false, brake: false, horn: false };
   private readonly pids = new Map<string, number>();
@@ -41,7 +43,7 @@ export class Controls {
 
   reset(): void {
     this.keys.clear();
-    this.stick = 0; this.stickPid = null;
+    this.stick = 0; this.stickY = 0; this.stickPid = null;
     this.held.gas = this.held.brake = this.held.horn = false;
     this.pids.clear();
     this.els.base.classList.remove('active');
@@ -53,7 +55,7 @@ export class Controls {
     const { zone, base, knob } = this.els;
     zone.addEventListener('pointerdown', e => {
       // a new finger while the old one is "still down" means the old lift-off was lost: follow the new one
-      if (this.stickPid !== null && this.stickPid !== e.pointerId) { this.stickPid = null; this.stick = 0; }
+      if (this.stickPid !== null && this.stickPid !== e.pointerId) { this.stickPid = null; this.stick = 0; this.stickY = 0; }
       if (this.stickPid !== null) return;
       e.preventDefault();
       this.stickPid = e.pointerId;
@@ -62,7 +64,7 @@ export class Controls {
       this.radius = Math.max(40, Math.min(70, r.height * 0.18));
       base.style.setProperty('--r', `${this.radius}px`);
       this.cx = Math.min(Math.max(e.clientX, r.left + this.radius), r.right - this.radius);
-      const cy = Math.min(Math.max(e.clientY, r.top + this.radius), r.bottom - this.radius);
+      const cy = this.cy = Math.min(Math.max(e.clientY, r.top + this.radius), r.bottom - this.radius);
       base.style.left = `${this.cx - r.left}px`; base.style.top = `${cy - r.top}px`;
       base.classList.add('active');
       this.moveStick(e);
@@ -70,7 +72,7 @@ export class Controls {
     zone.addEventListener('pointermove', e => { if (e.pointerId === this.stickPid) this.moveStick(e); });
     const end = (e: PointerEvent) => {
       if (e.pointerId !== this.stickPid) return;
-      this.stickPid = null; this.stick = 0;
+      this.stickPid = null; this.stick = 0; this.stickY = 0;
       base.classList.remove('active');
       knob.style.transform = 'translate(-50%, -50%)';
     };
@@ -80,10 +82,12 @@ export class Controls {
   }
 
   private moveStick(e: PointerEvent): void {
-    const dx = Math.max(-this.radius, Math.min(this.radius, e.clientX - this.cx - 0));
-    const v = dx / this.radius;
-    this.stick = Math.abs(v) < 0.08 ? 0 : v;
-    this.els.knob.style.transform = `translate(calc(-50% + ${dx}px), -50%)`;
+    const r = this.radius, cy = this.cy;
+    const dx = Math.max(-r, Math.min(r, e.clientX - this.cx)), dy = Math.max(-r, Math.min(r, e.clientY - cy));
+    const vx = dx / r, vy = -dy / r;
+    this.stick = Math.abs(vx) < 0.12 ? 0 : vx;
+    this.stickY = vy;
+    this.els.knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
   private bindButton(name: 'gas' | 'brake' | 'horn', el: HTMLElement): void {
@@ -103,11 +107,21 @@ export class Controls {
     el.addEventListener('contextmenu', e => e.preventDefault());
   }
 
+  /**
+   * One-thumb driving, as in Toofan: push the stick any way except back and the bike goes (harder = faster); its left/right
+   * part steers; pull it back to brake. The gas and brake buttons and the keyboard do the same job.
+   */
   read(): BikeInput {
     const kb = (this.anyKey(KEYS.right) ? 1 : 0) - (this.anyKey(KEYS.left) ? 1 : 0);
     this.state.steer = kb !== 0 ? kb : this.stick;
-    this.state.throttle = this.held.gas || this.anyKey(KEYS.gas) ? 1 : 0;
-    this.state.brake = this.held.brake || this.anyKey(KEYS.brake) ? 1 : 0;
+    const mag = Math.min(1, Math.hypot(this.stick, Math.max(0, this.stickY)));
+    const back = this.stickY < -0.35;
+    const stickThr = back || mag < 0.15 ? 0 : mag;
+    const stickBrk = back ? Math.min(1, -this.stickY) : 0;
+    const key = this.anyKey(KEYS.gas) || this.held.gas ? 1 : 0;
+    const brk = this.held.brake || this.anyKey(KEYS.brake) ? 1 : stickBrk;
+    this.state.throttle = brk > 0 ? 0 : Math.max(key, stickThr);
+    this.state.brake = brk;
     this.state.horn = this.held.horn || this.anyKey(KEYS.horn);
     return this.state;
   }

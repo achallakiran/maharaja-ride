@@ -28,3 +28,9 @@ First-person voxel bike ride through Bangalore peak traffic. Free ride on a loop
 6. **Water and sand**: puddles in ditches, splash cubes scaled to speed, spray on the first-person view, side-blown sand, wheel dust, quality tiers.
 7. **Weather and time of day**: rain, wet roads, evening/night with headlights.
 8. **Polish**: audio (horns, ambience, engines), pause/settings, installable on mobile, final perf pass.
+
+## Phase 2d — Toofan feel, voxel-bike fall (done)
+- One-thumb stick (magnitude = throttle, x = steer, pull back = brake); gas/brake buttons still work.
+- Direct heading steering with lane assist; no wobble/balance noise, no red/blink screen effects.
+- Warning is felt: bars and view shake on rough ground, phone buzz.
+- Deterministic fall: ditch edge drop > 0.18 m above 40 km/h. Fall sequence is voxel-bike's (2.85 s: tumble, slide, stand, run back, remount).

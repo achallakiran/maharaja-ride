@@ -55,6 +55,3 @@ body.spike #tools{position:fixed;right:calc(8px + env(safe-area-inset-right));bo
 #tools button{min-width:52px;height:44px;border:0;border-radius:10px;background:rgba(20,20,22,.7);color:#f2f0ea;font-size:14px}
 #tools button:active{background:rgba(241,194,50,.9);color:#1b1c1e}
 
-/* ---- balance warning + fall blink */
-#warn{position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(209,37,46,0) 45%,rgba(209,37,46,.72) 100%)}
-#blink{position:fixed;inset:0;background:#000;pointer-events:none;opacity:0;z-index:15}

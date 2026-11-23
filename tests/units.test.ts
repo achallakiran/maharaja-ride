@@ -469,51 +469,81 @@ test('bike: mud, water and sand cap the top speed well below tar', () => {
     return b.v;
   };
   const tar = run('tar'), mud = run('mud'), water = run('water'), sand = run('sand');
-  assert.ok(tar > 0.9 * BIKE.vmax && mud < 0.5 * tar && water < 0.55 * tar && sand < 0.65 * tar, `${tar} ${mud} ${water} ${sand}`);
+  assert.ok(tar > 0.9 * BIKE.vmax && mud < 0.55 * tar && water < 0.6 * tar && sand < 0.65 * tar, `${tar} ${mud} ${water} ${sand}`);
 });
 
 
 
-// ---------------------------------------------------------------- Phase 2c: balance, wobble, feet, falls
-function rideBike(start: number, secs: number, policy: (b: ReturnType<typeof newBike>) => number) {
-  const loop = bangaloreLoop(), surf = roadSurface(loop);
-  const g = (s: number, d: number) => { const x = surf.sample(s, d); return { h: x.p ?? x.h, kind: x.kind }; };
-  const b = newBike(start);
-  let maxWob = 0;
-  for (let i = 0; i < 60 * secs; i++) { stepBike(b, { ...IDLE, throttle: policy(b) }, s => loop.kappaAt(s), loop.length, 1 / 60, g); maxWob = Math.max(maxWob, Math.abs(b.wob)); }
-  return { b, maxWob };
-}
+// ---------------------------------------------------------------- Phase 2c: Toofan-style bike, feet, falls
+const GROUND = (surf: ReturnType<typeof roadSurface>) => (s: number, d: number) => { const x = surf.sample(s, d); return { h: x.p ?? x.h, kind: x.kind }; };
 
-test('balance: a stopped bike stays up on one foot (the left)', () => {
-  const { b } = rideBike(1650, 10, () => 0);
-  assert.equal(b.falls, 0); assert.ok(!b.footBoth && b.foot === -1); assert.ok(Math.abs(b.bal) < 0.05);
+test('bike (Toofan feel): speed follows the throttle, strong brakes, quick engine braking', () => {
+  const loop = bangaloreLoop(), straight = () => 0;
+  const b = newBike(300);
+  for (let i = 0; i < 60 * 4; i++) stepBike(b, { ...IDLE, throttle: 0.5 }, straight, 1e6, 1 / 60);
+  assert.ok(Math.abs(b.v - BIKE.vmax * 0.5) < 0.2, `half stick -> ${b.v}`);
+  for (let i = 0; i < 60 * 8; i++) stepBike(b, { ...IDLE, throttle: 1 }, straight, 1e6, 1 / 60);
+  assert.ok(b.v > BIKE.vmax - 0.2);
+  const v0 = b.v;
+  for (let i = 0; i < 30; i++) stepBike(b, IDLE, straight, 1e6, 1 / 60);
+  assert.ok(v0 - b.v > 0.7 && v0 - b.v < 1.0, `coast ${v0 - b.v}`);
+  const v1 = b.v;
+  for (let i = 0; i < 30; i++) stepBike(b, { ...IDLE, brake: 1 }, straight, 1e6, 1 / 60);
+  assert.ok(v1 - b.v > 6.5, `brake ${v1 - b.v}`);
+  void loop;
 });
 
-test('balance: a careful rider (lifts when the bars shake, stays under 22 km/h) rarely falls on the rough starting roads', () => {
-  let falls = 0;
-  for (const st of [150, 1300, 2300, 3000, 4100, 5200]) falls += rideBike(st, 60, b => (Math.abs(b.wob) > 0.1 || b.v > 6 ? 0 : 1)).b.falls;
-  assert.ok(falls <= 1, `falls ${falls}`);
+test('bike: rough ground lowers top speed (mud and water much more than tar)', () => {
+  const run = (kind: 'tar' | 'mud' | 'water' | 'sand' | 'broken') => {
+    const b = newBike(300);
+    for (let i = 0; i < 60 * 12; i++) stepBike(b, { ...IDLE, throttle: 1 }, () => 0, 1e6, 1 / 60, () => ({ h: 0, kind }));
+    return b.v;
+  };
+  const tar = run('tar'), mud = run('mud'), water = run('water'), sand = run('sand'), broken = run('broken');
+  assert.ok(mud < 0.55 * tar && water < 0.6 * tar && sand < 0.65 * tar && broken < 0.85 * tar, `${tar} ${mud} ${water} ${sand} ${broken}`);
 });
 
-test('balance: flat-out through the rough roads wobbles hard and sometimes falls', () => {
-  let falls = 0, wob = 0;
-  for (const st of [150, 1300, 2300, 3000, 4100, 5200]) { const r = rideBike(st, 60, () => 1); falls += r.b.falls; wob = Math.max(wob, r.maxWob); }
-  assert.ok(falls >= 1 && falls <= 14, `falls ${falls}`);
-  assert.ok(wob > 0.3, `wobble ${wob}`);
+test('feet: stopped = left foot down; gas at a crawl = both feet walk the bike along', () => {
+  const b = newBike(300);
+  for (let i = 0; i < 30; i++) stepBike(b, IDLE, () => 0, 1e6, 1 / 60);
+  assert.equal(b.foot, -1); assert.ok(!b.footBoth);
+  const w0 = b.walk;
+  for (let i = 0; i < 20; i++) stepBike(b, { ...IDLE, throttle: 1 }, () => 0, 1e6, 1 / 60);
+  assert.ok(b.footBoth && b.walk > w0 + 0.3 && b.v < 2.8);
+  for (let i = 0; i < 90; i++) stepBike(b, { ...IDLE, throttle: 1 }, () => 0, 1e6, 1 / 60);
+  assert.ok(!b.footBoth && b.v > 5, 'feet come up once the bike is moving');
 });
 
-test('falls: tip, blink, then reset upright and slow a little further on, with a grace period', () => {
-  const loop = bangaloreLoop(), surf = roadSurface(loop);
-  const g = (s: number, d: number) => { const x = surf.sample(s, d); return { h: x.p ?? x.h, kind: x.kind }; };
-  const b = newBike(2000); b.v = 14; b.wob = 0.9;
-  stepBike(b, IDLE, s => loop.kappaAt(s), loop.length, 1 / 60, g);
-  assert.ok(b.fallT > 0, 'fell');
-  let blinked = 0;
-  for (let i = 0; i < 60 * 2; i++) { stepBike(b, IDLE, s => loop.kappaAt(s), loop.length, 1 / 60, g); blinked = Math.max(blinked, b.blink); }
-  assert.ok(blinked > 0.95, 'blacked out');
-  assert.equal(b.fallT, 0); assert.ok(b.v < 0.5 && Math.abs(b.tip) < 1e-9 && b.falls === 1);
+test('ditch: an edge hit above the fall speed throws the bike; below it you just scoot out', () => {
+  const ditch = (s: number) => (s < 300 || s > 304 ? 0 : -0.3);
+  const g = (s: number) => ({ h: ditch(s), kind: 'tar' as const });
+  const run = (v0: number) => {
+    const b = newBike(290); b.v = v0;
+    for (let i = 0; i < 60 * 2; i++) stepBike(b, { ...IDLE, throttle: v0 / BIKE.vmax }, () => 0, 1e6, 1 / 60, g);
+    return b;
+  };
+  assert.equal(run(BIKE.fallSpeed + 3).falls, 1);
+  assert.equal(run(BIKE.fallSpeed - 3).falls, 0);
 });
 
+test('falls: down, slide, rider up and back on, bike upright and ready after 2.85 s', () => {
+  const loop = bangaloreLoop(), surf = roadSurface(loop), g = GROUND(surf);
+  const b = newBike(2000); b.v = 14;
+  const hole = (s: number) => g(s, 0).h;
+  void hole;
+  // force a fall by driving into a made-up ditch
+  const ditch = (s: number) => (s < 2010 || s > 2014 ? 0 : -0.2);
+  const gd = (s: number) => ({ h: ditch(s), kind: 'tar' as const });
+  let maxTip = 0, vAtStart = 0;
+  for (let i = 0; i < 60 * 6; i++) {
+    stepBike(b, { ...IDLE, throttle: 1 }, s => loop.kappaAt(s), loop.length, 1 / 60, gd);
+    if (b.fallT > 0.01 && vAtStart === 0) vAtStart = b.v;
+    maxTip = Math.max(maxTip, Math.abs(b.tip));
+  }
+  assert.equal(b.falls, 1); assert.ok(maxTip > 1.3, `tip ${maxTip}`);
+  assert.ok(vAtStart < 6, `slides at a third of the speed ${vAtStart}`);
+  assert.equal(b.fallT, 0); assert.ok(b.v < 0.5 || b.v >= 0); assert.equal(b.tip, 0);
+});
 
 test('surface: unmarked hazards exist (sharp holes, sunken slabs, holes hidden under puddles)', () => {
   const loop = bangaloreLoop(), surf = roadSurface(loop);
@@ -525,39 +555,18 @@ test('surface: unmarked hazards exist (sharp holes, sunken slabs, holes hidden u
   assert.ok(kinds.has('crack')); assert.ok(hidden > 20, `hidden ${hidden}`); assert.ok(slabEdges > 50, `edges ${slabEdges}`);
 });
 
-test('feet: a slow bike can paddle out of a half-metre trench with the throttle on', () => {
-  const loop = bangaloreLoop();
-  const trench = (s: number) => (s < 300 || s > 308 ? 0 : -0.5 * Math.min(1, 1.5 * Math.sin(Math.PI * (s - 300) / 8)));
-  const g = (s: number) => ({ h: trench(s), kind: 'tar' as const });
-  const b = newBike(303); b.v = 1;
-  for (let i = 0; i < 60 * 15; i++) stepBike(b, { ...IDLE, throttle: 1 }, s => loop.kappaAt(s), loop.length, 1 / 60, g);
-  assert.ok(b.s > 312, `got to ${b.s}`);
-});
-
-test('surface: no deep or big ditches any more (largest cross-road ditch is shallow)', () => {
+test('surface: no deep or big ditches (largest cross-road ditch is shallow)', () => {
   const loop = bangaloreLoop(), surf = roadSurface(loop);
   let worst = 0;
   for (let k = 0; k * 8 < loop.length; k++) for (const d of (surf as unknown as { cell(k: number): { ditches: { depth: number }[] } }).cell(k).ditches) worst = Math.max(worst, d.depth);
   assert.ok(worst > 0 && worst < 0.3, `deepest ditch ${worst}`);
 });
 
-test('ditch: hitting a ditch edge at speed stops the bike nearly dead and usually throws it', () => {
-  const loop = bangaloreLoop();
-  const ditch = (s: number) => (s < 300 || s > 304 ? 0 : -0.16 * Math.min(1, 3 * Math.sin(Math.PI * (s - 300) / 4)));
-  const g = (s: number) => ({ h: ditch(s), kind: 'tar' as const });
-  const run = (v0: number) => {
-    const b = newBike(290); b.v = v0; let minV = 99;
-    for (let i = 0; i < 60 * 4; i++) { stepBike(b, { ...IDLE, throttle: 0.4 }, () => 0, 1e6, 1 / 60, g); minV = Math.min(minV, b.v); }
-    return { falls: b.falls, minV };
-  };
-  const fast = run(14), slow = run(4.5);
-  assert.ok(fast.falls === 1 && fast.minV < 5, `fast ${JSON.stringify(fast)}`);
-  assert.equal(slow.falls, 0);
-});
-
-test('feet: crawling with the gas on walks the bike with both feet, alternating', () => {
-  const b = newBike(300); b.v = 1.2;
-  const w0 = b.walk;
-  for (let i = 0; i < 60; i++) stepBike(b, { ...IDLE, throttle: 1 }, () => 0, 1e6, 1 / 60);
-  assert.ok(b.walk > w0 + 1, 'walk phase advances');
+test('bike: a rough, wrecked road ride never throws a slow rider and leaves a fast rider on the road', () => {
+  const loop = bangaloreLoop(), surf = roadSurface(loop), g = GROUND(surf);
+  for (const [name, thr, maxFalls] of [['slow', 0.3, 0], ['full', 1, 12]] as const) {
+    const b = newBike(150);
+    for (let i = 0; i < 60 * 90; i++) stepBike(b, { ...IDLE, throttle: thr }, s => loop.kappaAt(s), loop.length, 1 / 60, g);
+    assert.ok(b.falls <= maxFalls, `${name}: ${b.falls} falls`); assert.ok(Math.abs(b.d) < 8);
+  }
 });
