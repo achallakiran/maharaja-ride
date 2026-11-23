@@ -8,12 +8,14 @@ export const VOXEL_M = 0.1;
 export const K = {
   BODY: 1, DARK: 2, GLASS: 3, TIRE: 4, CHROME: 5, HEAD: 6, TAIL: 7, SEAT: 8, SHIRT: 9,
   SKIN: 10, HELMET: 11, CANVAS: 12, WHITE: 13, CARGO: 14, ACCENT: 15, RIM: 16, JEANS: 17,
+  MIRROR: 18, GLOVE: 19,
 } as const;
 
 /** sRGB hex per palette index (index 0 unused). BODY is white: paint is applied per instance. */
 export const PALETTE_HEX: readonly number[] = [
   0x000000, 0xffffff, 0x2b2d31, 0x7fa3b5, 0x1d1d1f, 0xc9ced4, 0xfff2b8, 0xd1252e, 0x2a2623, 0x3f6fb2,
   0xb07a56, 0xd8d8d2, 0x1b1c1e, 0xf2f0ea, 0xb9965b, 0xf1c232, 0x9aa0a8, 0x3a4560,
+  0xa9c4d2, 0x2a1f1a,
 ];
 
 export type VehicleId = 'bike' | 'scooter' | 'auto' | 'car' | 'cab' | 'tempo' | 'bus' | 'truck';

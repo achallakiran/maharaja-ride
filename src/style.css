@@ -1,10 +1,56 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:#1b1c1e;overflow:hidden;overscroll-behavior:none}
 body{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;font:600 12px/1.2 ui-monospace,Menlo,Consolas,monospace;color:#f2f0ea}
+button{font:inherit;color:inherit;touch-action:none}
+svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #world{position:fixed;inset:0;width:100%;height:100%;display:block}
+[hidden]{display:none!important}
+
+/* ---- ride ui */
+#ride{position:fixed;inset:0;pointer-events:none}
+#stickZone{position:absolute;left:0;top:0;bottom:0;width:55%;pointer-events:auto}
+#stickBase{--r:56px;position:absolute;left:calc(env(safe-area-inset-left) + 110px);bottom:calc(env(safe-area-inset-bottom) + 40px);width:calc(var(--r)*2);height:calc(var(--r)*2);margin:calc(var(--r)*-1) 0 0 calc(var(--r)*-1);transform:translateY(calc(var(--r)*0));border-radius:50%;border:2px solid rgba(255,255,255,.28);background:rgba(20,20,22,.22);opacity:.7}
+#stickBase.active{opacity:1;background:rgba(20,20,22,.34)}
+#stickKnob{position:absolute;left:50%;top:50%;width:46%;height:46%;border-radius:50%;background:rgba(255,255,255,.62);transform:translate(-50%,-50%)}
+#pedals{position:absolute;right:calc(env(safe-area-inset-right) + 14px);bottom:calc(env(safe-area-inset-bottom) + 14px);display:flex;gap:12px;align-items:flex-end;pointer-events:auto}
+#pedals button{border:2px solid rgba(255,255,255,.3);background:rgba(20,20,22,.45);border-radius:50%;display:grid;place-items:center;padding:0}
+#pedals button svg{width:55%;height:55%}
+#btnGas{width:92px;height:92px}
+#btnBrake{width:76px;height:76px}
+#btnHorn{width:56px;height:56px;margin-bottom:6px}
+#pedals button.down{background:rgba(241,194,50,.88);color:#1b1c1e;border-color:transparent}
+#btnBrake.down{background:rgba(209,37,46,.9);color:#fff}
+#speedo{position:absolute;top:calc(env(safe-area-inset-top) + 8px);left:50%;transform:translateX(-50%);padding:4px 14px;background:rgba(20,20,22,.5);border-radius:10px;text-align:center}
+#speedo b{font-size:26px;letter-spacing:1px}
+#speedo small{margin-left:6px;opacity:.8}
+#trip{position:absolute;top:calc(env(safe-area-inset-top) + 8px);left:calc(env(safe-area-inset-left) + 8px);display:flex;flex-direction:column;gap:3px;padding:5px 9px;background:rgba(20,20,22,.5);border-radius:8px;max-width:34vw}
+#place:empty{display:none}
+#place{font-size:11px;opacity:.85}
+#sysbtns{position:absolute;top:calc(env(safe-area-inset-top) + 8px);right:calc(env(safe-area-inset-right) + 8px);display:flex;gap:8px;pointer-events:auto}
+#sysbtns button{width:40px;height:40px;border:0;border-radius:10px;background:rgba(20,20,22,.5);display:grid;place-items:center;padding:0}
+#sysbtns svg{width:22px;height:22px}
+#btnMute.off{opacity:.45}
+
+/* ---- start + rotate */
+#start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(circle at 50% 40%,#3a2a2c,#16171a 70%);text-align:center}
+#start .title{font-size:clamp(28px,7vw,54px);font-weight:800;letter-spacing:.16em}
+#start .title span{color:#f1c232}
+#start p{margin:0;opacity:.8;letter-spacing:.2em;text-transform:uppercase;font-size:12px}
+#startBtn{margin-top:10px;padding:16px 34px;border:0;border-radius:14px;background:#f1c232;color:#1b1c1e;font-size:18px;font-weight:800;letter-spacing:.14em}
+#startBtn:active{transform:scale(.97)}
+#start small{opacity:.55;max-width:80vw}
+#rotate{position:fixed;inset:0;z-index:20;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#16171a}
+#rotate svg{width:96px;height:96px;animation:tilt 2.2s ease-in-out infinite}
+@keyframes tilt{0%,30%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
+@media (orientation:portrait) and (pointer:coarse){body.game #rotate{display:flex}}
+
+/* ---- phase 0 spike (hidden unless ?spike=1) */
+#hud,#tag,#tools{display:none}
+body.spike #hud,body.spike #tag,body.spike #tools{display:block}
+body.spike #start,body.spike #ride,body.spike #rotate{display:none!important}
 #hud,#tag{position:fixed;left:calc(8px + env(safe-area-inset-left));padding:5px 8px;background:rgba(20,20,22,.62);border-radius:6px;pointer-events:none}
 #hud{top:calc(8px + env(safe-area-inset-top))}
 #tag{bottom:calc(8px + env(safe-area-inset-bottom));opacity:.8;font-size:10px}
-#tools{position:fixed;right:calc(8px + env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));display:flex;gap:8px}
-#tools button{min-width:52px;height:44px;border:0;border-radius:10px;background:rgba(20,20,22,.7);color:#f2f0ea;font:inherit;font-size:14px}
+body.spike #tools{position:fixed;right:calc(8px + env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));display:flex;gap:8px}
+#tools button{min-width:52px;height:44px;border:0;border-radius:10px;background:rgba(20,20,22,.7);color:#f2f0ea;font-size:14px}
 #tools button:active{background:rgba(241,194,50,.9);color:#1b1c1e}

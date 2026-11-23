@@ -179,3 +179,244 @@ test('traffic: a full ring still respects capacity (never over-fills)', () => {
   }
   assert.ok(w.vehicles.length < 500);
 });
+
+// ---------------------------------------------------------------- Phase 1: route loop
+import { ROUTE_A, ROUTE_B, MILESTONES } from '../src/route/route-data.ts';
+import { RoadLoop, buildLaneRing } from '../src/route/loop.ts';
+import { bangaloreLoop } from '../src/route/bangalore.ts';
+
+test('route data: A and B share endpoints; lane ring is closed with U-turns at both ends', () => {
+  const a0 = ROUTE_A[0], b0 = ROUTE_B[0], a1 = ROUTE_A.at(-1)!, b1 = ROUTE_B.at(-1)!;
+  assert.ok(Math.hypot(a0[0] - b0[0], a0[1] - b0[1]) < 1);
+  assert.ok(Math.hypot(a1[0] - b1[0], a1[1] - b1[1]) < 1);
+  const ring = buildLaneRing(ROUTE_A, ROUTE_B);
+  assert.ok(ring.length > 28000);
+});
+
+test('loop: length matches the real routes, spacing even, smooth', () => {
+  const loop = bangaloreLoop();
+  assert.ok(loop.length > 28000 && loop.length < 31000, `length ${loop.length}`);
+  assert.ok(Math.abs(loop.ds - 1) < 0.01);
+  let maxStep = 0, minStep = Infinity;
+  for (let s = 0; s < loop.length; s += 1) {
+    const p = loop.sample(s), q = loop.sample(s + 1);
+    const d = Math.hypot(q.x - p.x, q.z - p.z);
+    maxStep = Math.max(maxStep, d); minStep = Math.min(minStep, d);
+    assert.ok(Math.abs(Math.hypot(p.fx, p.fz) - 1) < 1e-9);
+  }
+  assert.ok(maxStep < 1.2 && minStep > 0.5, `steps ${minStep}..${maxStep}`);
+});
+
+test('loop: closes seamlessly (end meets start, same heading)', () => {
+  const loop = bangaloreLoop();
+  const a = loop.sample(loop.length - 0.01), b = loop.sample(0);
+  assert.ok(Math.hypot(a.x - b.x, a.z - b.z) < 0.1);
+  assert.ok(a.fx * b.fx + a.fz * b.fz > 0.999);
+});
+
+test('loop: corners are rideable (minimum turn radius)', () => {
+  const loop = bangaloreLoop();
+  let maxK = 0, spots = 0, last = -1e9;
+  for (let s = 0; s < loop.length; s += 1) {
+    const k = Math.abs(loop.kappaAt(s));
+    maxK = Math.max(maxK, k);
+    if (k > 1 / 5 && s - last > 40) spots++;
+    if (k > 1 / 5) last = s;
+  }
+  // the only truly tight spot should be the U-turn at Aquamarine, where route A hands over to route B
+  assert.ok(1 / maxK >= 2, `tightest radius ${(1 / maxK).toFixed(1)} m`);
+  assert.ok(spots <= 4, `${spots} corners tighter than 5 m`);
+});
+
+test('loop: curvature sign - a right-hand circle has positive curvature', () => {
+  // clockwise circle seen from above in (x east, z south): heading turns right
+  const R = 100, ring = Array.from({ length: 120 }, (_, i) => { const t = (i / 120) * Math.PI * 2; return [R * Math.sin(t), -R * (1 - Math.cos(t))] as const; });
+  const loop = new RoadLoop(ring);
+  const k = loop.kappaAt(50);
+  assert.ok(Math.abs(Math.abs(k) - 1 / R) < 0.002, `kappa ${k}`);
+  // a point to the right of a right-turning road is closer to the circle centre
+  const c = loop.sample(100), o = loop.offset(100, 10);
+  const centre = [0, -R];
+  const dc = Math.hypot(c.x - centre[0], c.z - centre[1]), dof = Math.hypot(o.x - centre[0], o.z - centre[1]);
+  assert.ok(k > 0 ? dof < dc : dof > dc);
+});
+
+test('loop: milestones are placed, include both passes of shared roads, and name lookup works', () => {
+  const loop = bangaloreLoop();
+  // Forum Mall is ~340 m off both routes, so it is (rightly) not placed on the loop
+  assert.ok(loop.milestones.length >= MILESTONES.length - 2, `placed ${loop.milestones.length}`);
+  const utopia = loop.milestones.filter(m => m.short === 'Utopia');
+  assert.ok(utopia.length >= 1);
+  const near = loop.nearMilestone(utopia[0].s + 10);
+  assert.equal(near?.short, 'Utopia');
+  assert.equal(loop.nearMilestone(utopia[0].s + loop.length / 2 + 5000, 1), null);
+});
+
+test('loop: delta is the signed shortest distance around the ring', () => {
+  const loop = bangaloreLoop(), L = loop.length;
+  assert.ok(Math.abs(loop.delta(L - 5, 5) - 10) < 1e-9);
+  assert.ok(Math.abs(loop.delta(5, L - 5) + 10) < 1e-9);
+});
+
+// ---------------------------------------------------------------- Phase 1: bike, road chunks, engine
+import { newBike, stepBike, BIKE, type BikeInput } from '../src/sim/bike.ts';
+import { newEngine, stepEngine, GEAR_TOP, IDLE_RPM, REDLINE_RPM } from '../src/audio/engine-model.ts';
+import { buildRoadChunk, chunkProps, chunkCount, CHUNK_LEN, COLUMNS, ROAD_HALF, SHOULDER } from '../src/world/road-chunk.ts';
+
+const START = 150; // a straight stretch of route A
+const IDLE: BikeInput = { steer: 0, throttle: 0, brake: 0, horn: false };
+const run = (b: ReturnType<typeof newBike>, inp: BikeInput, seconds: number, loop = bangaloreLoop()) => {
+  for (let i = 0; i < seconds * 60; i++) stepBike(b, inp, s => loop.kappaAt(s), loop.length, 1 / 60);
+};
+
+test('bike: accelerates toward vmax, never beyond, never negative', () => {
+  const b = newBike(START);
+  const straight = { kappaAt: () => 0, length: 1e7 } as unknown as ReturnType<typeof bangaloreLoop>;
+  run(b, { ...IDLE, throttle: 1 }, 6, straight);
+  assert.ok(b.v > 12);
+  run(b, { ...IDLE, throttle: 1 }, 120, straight);
+  assert.ok(b.v > BIKE.vmax * 0.85 && b.v <= BIKE.vmax + 1e-9, `top speed ${b.v}`);
+  run(b, { ...IDLE, brake: 1 }, 10, straight);
+  assert.equal(b.v, 0);
+});
+
+test('bike: coasting slows down, braking stops faster', () => {
+  const a = newBike(START), c = newBike(START);
+  a.v = c.v = 15;
+  run(a, IDLE, 3); run(c, { ...IDLE, brake: 1 }, 3);
+  assert.ok(a.v < 15 && a.v > c.v);
+});
+
+test('bike: steering right moves right of the lane, left moves left; no steering at standstill', () => {
+  const r = newBike(START), l = newBike(START), z = newBike(START);
+  for (const b of [r, l]) b.v = 10;
+  run(r, { ...IDLE, throttle: 0.5, steer: 1 }, 1.2);
+  run(l, { ...IDLE, throttle: 0.5, steer: -1 }, 1.2);
+  assert.ok(r.d > 0.2 && l.d < -0.2, `d ${r.d} ${l.d}`);
+  assert.ok(r.lean > 0 && l.lean < 0);
+  run(z, { ...IDLE, steer: 1 }, 2);
+  assert.equal(z.d, 0);
+});
+
+test('bike: steering is capped to a lane-change angle, not a spin-out', () => {
+  const b = newBike(START);
+  b.v = 12;
+  let worst = 0;
+  for (let i = 0; i < 60 * 3; i++) { stepBike(b, { ...IDLE, throttle: 0.4, steer: 1 }, s => bangaloreLoop().kappaAt(s), bangaloreLoop().length, 1 / 60); worst = Math.max(worst, Math.abs(b.psi)); }
+  assert.ok(worst < BIKE.maxAngle + 0.15, `angle off the road ${worst}`);
+});
+
+test('bike: road edge is a hard limit and the shoulder is slow', () => {
+  const b = newBike(START);
+  b.v = 20;
+  run(b, { ...IDLE, throttle: 1, steer: 1 }, 20);
+  assert.ok(Math.abs(b.d) <= BIKE.edge + 1e-9);
+  assert.ok(b.v < 12, `speed on the shoulder ${b.v}`);
+});
+
+test('bike: a simple centre-following rider completes the whole loop without leaving the road', () => {
+  const loop = bangaloreLoop(), b = newBike(START);
+  let worst = 0, laps = 0, prev = 0;
+  const kappa = (s: number) => loop.kappaAt(s);
+  for (let i = 0; i < 60 * 3000 && laps < 1; i++) {
+    // slow down for tight corners, steer back toward the centre
+    const k = Math.abs(kappa(b.s + 12));
+    const want = Math.min(BIKE.vmax * 0.8, Math.sqrt(4.5 / Math.max(k, 1e-4)));
+    const steer = Math.max(-1, Math.min(1, 0.22 * b.d + 1.6 * b.psi));
+    stepBike(b, { steer: -steer, throttle: b.v < want ? 1 : 0, brake: b.v > want + 2 ? 1 : 0, horn: false }, kappa, loop.length, 1 / 60);
+    worst = Math.max(worst, Math.abs(b.d));
+    if (b.s < prev - loop.length / 2) laps++;
+    prev = b.s;
+  }
+  assert.equal(laps, 1, 'finished a lap');
+  assert.ok(worst < 4.5, `max lateral offset ${worst}`);
+  assert.ok(b.odo > loop.length * 0.98);
+});
+
+test('bike: with no steering the bike follows the road, even through bends', () => {
+  const b = newBike(START), loop = bangaloreLoop();
+  b.v = 8;
+  let worst = 0;
+  for (let i = 0; i < 60 * 60; i++) { stepBike(b, { ...IDLE, throttle: b.v < 9 ? 0.6 : 0.1 }, s => loop.kappaAt(s), loop.length, 1 / 60); worst = Math.max(worst, Math.abs(b.d)); }
+  assert.ok(worst < 3, `drifted ${worst} m`);
+});
+
+test('engine model: rpm bounded, gears climb with speed and fall back, shifts have hysteresis', () => {
+  const e = newEngine();
+  let lastGear = 0, shiftsUp = 0;
+  for (let v = 0; v <= 25; v += 0.05) {
+    stepEngine(e, v, 1, 0.05);
+    assert.ok(e.rpm >= IDLE_RPM - 1 && e.rpm <= REDLINE_RPM + 1);
+    if (e.gear > lastGear) shiftsUp++;
+    assert.ok(e.gear >= lastGear);
+    lastGear = e.gear;
+  }
+  assert.equal(e.gear, GEAR_TOP.length - 1);
+  assert.equal(shiftsUp, GEAR_TOP.length - 1);
+  for (let v = 25; v >= 0; v -= 0.05) for (let k = 0; k < 4; k++) stepEngine(e, v, 0, 0.05);
+  assert.equal(e.gear, 0);
+  assert.ok(e.rpm < 2200);
+});
+
+test('road chunks: cover the loop, finite, upward facing, edges line up with neighbours', () => {
+  const loop = bangaloreLoop();
+  const n = chunkCount(loop);
+  assert.equal(n, Math.ceil(loop.length / CHUNK_LEN));
+  for (const c of [0, 1, 77, n - 2, n - 1]) {
+    const m = buildRoadChunk(loop, c);
+    assert.ok(m.quads >= (c === n - 1 ? 1 : CHUNK_LEN) * COLUMNS.length * 0.99, `quads ${m.quads} (chunk ${c})`);
+    for (const v of m.positions) assert.ok(Number.isFinite(v));
+    for (let t = 0; t < m.indices.length; t += 3) {
+      const P = (i: number) => [m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]];
+      const a = P(m.indices[t]), b = P(m.indices[t + 1]), cc = P(m.indices[t + 2]);
+      const e1 = [b[0] - a[0], b[2] - a[2]], e2 = [cc[0] - a[0], cc[2] - a[2]];
+      // normal y of (e1 x e2) in three's right-handed system: e1.z*e2.x - e1.x*e2.z
+      const ny = e1[1] * e2[0] - e1[0] * e2[1];
+      assert.ok(ny >= -0.05, 'faces up (tiny folds in hairpin pinches are tolerated)');
+    }
+  }
+  // the first row of chunk c+1 starts where chunk c ended
+  const a = buildRoadChunk(loop, 3), b = buildRoadChunk(loop, 4);
+  const q = (a.quads - COLUMNS.length) * 12 + 9; // first column of the last row, its far-left (s end) corner
+  assert.ok(Math.abs(a.positions[q] - b.positions[0]) < 0.05 && Math.abs(a.positions[q + 2] - b.positions[2]) < 0.05, 'chunks join without a gap');
+  assert.ok(COLUMNS[0].d0 === -SHOULDER && COLUMNS.at(-1)!.d1 === SHOULDER && ROAD_HALF === 5.25);
+  for (let i = 1; i < COLUMNS.length; i++) assert.ok(Math.abs(COLUMNS[i].d0 - COLUMNS[i - 1].d1) < 1e-9, 'columns are contiguous');
+});
+
+test('road props: deterministic, off the tar, trees farther out than posts', () => {
+  const loop = bangaloreLoop();
+  const a = chunkProps(loop, 12), b = chunkProps(loop, 12);
+  assert.deepEqual(a, b);
+  assert.ok(a.some(p => p.kind === 'post') && a.some(p => p.kind === 'lamp'));
+  const total = Array.from({ length: 60 }, (_, c) => chunkProps(loop, c)).flat();
+  assert.ok(total.some(p => p.kind === 'tree'));
+  assert.ok(total.length < 60 * 60, 'prop budget');
+});
+
+// ---------------------------------------------------------------- Phase 1: cockpit and props
+import { buildCockpit, COCKPIT_VOXEL } from '../src/voxel/cockpit.ts';
+import { buildPost, buildLamp, buildTree } from '../src/voxel/props.ts';
+
+test('cockpit: one connected piece, in bounds, bar is a believable width', () => {
+  const g = buildCockpit();
+  assert.equal(g.clipped, 0);
+  assert.equal(g.components(), 1);
+  assert.ok(g.countOf(K.BODY) > 100 && g.countOf(K.MIRROR) > 20 && g.countOf(K.GLOVE) > 40);
+  const b = g.bounds()!;
+  const widthM = (b.x1 - b.x0 + 1) * COCKPIT_VOXEL;
+  assert.ok(widthM > 1.0 && widthM < 1.4, `width ${widthM}`);
+  // symmetric left/right about the centre line
+  for (let y = 0; y < g.h; y++) for (let z = 0; z < g.l; z++) for (let x = 0; x < g.w; x++) {
+    assert.equal(g.get(x, y, z) === 0, g.get(g.w - 1 - x, y, z) === 0, `asymmetric at ${x},${y},${z}`);
+  }
+});
+
+test('props: post, lamp and both trees are single connected pieces with sane sizes', () => {
+  for (const [name, g, minH, maxH] of [['post', buildPost(), 0.8, 1.0], ['lamp', buildLamp(), 7.5, 8.5], ['tree0', buildTree(0), 4, 7], ['tree1', buildTree(1), 3, 7]] as const) {
+    assert.equal(g.clipped, 0, name);
+    assert.equal(g.components(), 1, name);
+    const vox = name === 'post' || name === 'lamp' ? 0.1 : 0.35;
+    const h = (g.bounds()!.y1 + 1) * vox;
+    assert.ok(h >= minH && h <= maxH, `${name} height ${h}`);
+  }
+});

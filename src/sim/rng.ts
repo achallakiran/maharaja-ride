@@ -23,3 +23,9 @@ export function pickWeighted(weights: readonly number[], r: number): number {
   }
   return weights.length - 1;
 }
+
+/** Cheap deterministic hash of two numbers into [0,1). */
+export function hash2(x: number, z: number): number {
+  const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+  return n - Math.floor(n);
+}

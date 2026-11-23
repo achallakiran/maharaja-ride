@@ -29,3 +29,7 @@ src/render/  three.js adapters (instanced vehicle fleet)
 src/spike/   Phase 0 perf spike scene
 tests/       node unit tests + headless smoke test
 ```
+
+
+## Phase 1 status: ride the empty loop
+First-person bike on the Utopia ↔ Aquamarine loop (left carriageway, U-turns at both ends): road streaming, arcade bike physics, cockpit with mirrors and lean, joystick + gas/brake/horn, engine sound. Spike still at `?spike=1`.
