@@ -34,6 +34,8 @@ export function runGame(): void {
   $('startBtn').addEventListener('click', begin);
   if (query.has('autostart')) { running = true; $('start').hidden = true; $('ride').hidden = false; game.resize(); }
 
+  $('btnView').addEventListener('click', () => game.toggleView());
+  addEventListener('keydown', e => { if (e.key === 'c' || e.key === 'C') game.toggleView(); });
   const mute = $('btnMute'), fs = $('btnFs');
   mute.addEventListener('click', () => { audio.setMuted(!audio.muted); mute.classList.toggle('off', audio.muted); });
   if (!document.fullscreenEnabled) fs.hidden = true;

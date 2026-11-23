@@ -35,6 +35,12 @@ export class Game {
   private readonly rig = new THREE.Group();
   private readonly bars = new THREE.Group();
   private readonly boots: THREE.Group[] = [];
+  private readonly bikeBody = new THREE.Group();
+  private readonly rider = new THREE.Group();
+  private readonly limbs: { thigh: THREE.Mesh; shin: THREE.Mesh; boot: THREE.Mesh; side: number }[] = [];
+  private readonly wheels: THREE.Mesh[] = [];
+  /** 'behind' = camera above and behind the rider so the whole bike and biker show; 'rider' = first person. */
+  view: 'behind' | 'rider' = 'behind';
   private footPrev = false;
   private lastFoot = 1;
   private fallsPrev = 0;
@@ -71,6 +77,7 @@ export class Game {
     this.stream = new RoadStream(this.loop);
     this.scene.add(this.stream.group);
     this.buildCockpit();
+    this.buildRider();
     this.scene.add(this.rig);
     this.resize();
     this.stream.update(this.bike.s);
@@ -126,6 +133,62 @@ export class Game {
     }
   }
 
+  toggleView(): void { this.view = this.view === 'behind' ? 'rider' : 'behind'; }
+
+  private static limb(m: THREE.Mesh, a: THREE.Vector3, b: THREE.Vector3): void {
+    const d = new THREE.Vector3().subVectors(b, a), len = d.length();
+    m.position.copy(a).addScaledVector(d, 0.5);
+    m.scale.y = len;
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.divideScalar(len || 1));
+  }
+
+  /** The rest of the bike (wheels, seat, fork, lights) and the biker, seen in the 'behind' view. */
+  private buildRider(): void {
+    const mat = (c: number) => new THREE.MeshLambertMaterial({ color: c });
+    const box = (w: number, h: number, l: number, m: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D) => {
+      const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); o.position.set(x, y, z); parent.add(o); return o;
+    };
+    const tyre = mat(0x151517), rim = mat(0x9a9ca0), steel = mat(0x55575c), seat = mat(0x1d1d20), tail = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+    const wheel = (z: number) => {
+      const g = new THREE.Group(); g.position.set(0, 0.34, z);
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.14, 14).rotateZ(Math.PI / 2), tyre);
+      const r = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.16, 10).rotateZ(Math.PI / 2), rim);
+      const hub = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.06), steel);
+      g.add(t, r, hub);
+      this.bikeBody.add(g); this.wheels.push(t as THREE.Mesh); (t as THREE.Mesh).userData.hub = hub;
+      return g;
+    };
+    wheel(-0.78); wheel(0.78);
+    box(0.34, 0.06, 0.62, steel, 0, 0.7, -0.78, this.bikeBody);        // rear mudguard
+    box(0.34, 0.1, 0.62, seat, 0, 0.82, -0.3, this.bikeBody);          // seat
+    box(0.1, 0.08, 0.04, tail, 0, 0.72, -1.12, this.bikeBody);         // tail light
+    box(0.12, 0.18, 0.7, steel, 0.24, 0.32, -0.45, this.bikeBody);     // exhaust
+    box(0.07, 0.62, 0.07, steel, 0.17, 0.62, 0.74, this.bikeBody);     // fork legs
+    box(0.07, 0.62, 0.07, steel, -0.17, 0.62, 0.74, this.bikeBody);
+    box(0.22, 0.18, 0.1, mat(0xf4e9b8), 0, 1.02, 0.98, this.bikeBody); // headlight
+    this.bikeBody.visible = true;
+    this.rig.add(this.bikeBody);
+
+    const jacket = mat(0x1f2f55), helmet = mat(0xe9e7e0), stripe = mat(0xc02a2a), jeans = mat(0x2f4a78), boots = mat(0x1a1a1c), glove = mat(0x222224), visor = mat(0x2a3440);
+    const R = this.rider;
+    box(0.46, 0.62, 0.3, jacket, 0, 1.28, -0.12, R).rotation.x = 0.32;      // torso leaning toward the bars
+    box(0.3, 0.3, 0.34, helmet, 0, 1.72, 0.0, R);                            // helmet
+    box(0.31, 0.06, 0.35, stripe, 0, 1.78, 0.0, R);
+    box(0.24, 0.1, 0.06, visor, 0, 1.7, 0.17, R);
+    box(0.34, 0.2, 0.28, jeans, 0, 0.98, -0.25, R);                          // hips on the seat
+    for (const side of [1, -1]) {
+      // arms: shoulder -> bar grip (they follow the bars' general position)
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1, 0.12), jacket); R.add(arm);
+      Game.limb(arm, new THREE.Vector3(side * 0.27, 1.42, 0.0), new THREE.Vector3(side * 0.34, 1.07, 0.58));
+      box(0.14, 0.12, 0.16, glove, side * 0.34, 1.05, 0.62, R);
+      const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1, 0.18), jeans), shin = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1, 0.16), jeans);
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.12, 0.34), boots);
+      R.add(thigh, shin, boot);
+      this.limbs.push({ thigh, shin, boot, side });
+    }
+    this.rig.add(R);
+  }
+
   resize(): void {
     const w = this.canvas.clientWidth || window.innerWidth, h = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
@@ -155,6 +218,23 @@ export class Game {
     this.renderer.render(this.scene, this.camera);
   }
 
+  private poseRider(): void {
+    const b = this.bike, A = new THREE.Vector3(), K = new THREE.Vector3(), F = new THREE.Vector3(), H = new THREE.Vector3();
+    // wheels spin with the road
+    for (const w of this.wheels) w.rotation.x = b.odo / 0.34;
+    for (const l of this.limbs) {
+      if (b.foot !== 0) this.lastFoot = b.foot;
+      const amt = b.footAmt * (b.footBoth || this.lastFoot === -l.side ? 1 : 0);
+      H.set(l.side * 0.2, 0.98, -0.2);
+      // riding: knee forward against the tank, boot on the peg. dabbing: the boot reaches the ground out to the side.
+      K.set(l.side * (0.27 + 0.2 * amt), 0.86 - 0.08 * amt, 0.3 + 0.1 * amt);
+      F.set(l.side * (0.27 + 0.45 * amt), 0.3 * (1 - amt) - b.y * amt, 0.0 + 0.22 * amt);
+      Game.limb(l.thigh, H, K); Game.limb(l.shin, K, F);
+      l.boot.position.set(F.x, F.y + 0.02, F.z + 0.1);
+    }
+    A.set(0, 0, 0);
+  }
+
   private updatePose(): void {
     const b = this.bike, r = this.loop.sample(b.s), t = this.v;
     const px = r.x - r.fz * b.d, pz = r.z + r.fx * b.d;
@@ -170,12 +250,15 @@ export class Game {
     this.rig.matrix.makeBasis(t.left, t.up, t.f).setPosition(px, b.y, pz);
     this.rig.matrixWorldNeedsUpdate = true;
     this.bars.rotation.y = -(b.steer + b.wob * 0.9) * 0.38;
+    const chase = this.view === 'behind';
+    this.bikeBody.visible = this.rider.visible = chase;
+    if (chase) this.poseRider();
     for (const g of this.boots) {
       const side = g.userData.side as number; // +1 = left of the rider
       const both = b.footBoth;
       if (b.foot !== 0) this.lastFoot = b.foot;
       const amt = b.footAmt * (both || this.lastFoot === -side ? 1 : 0);
-      g.visible = amt > 0.03;
+      g.visible = amt > 0.03 && !chase;
       // stylised: the planted leg reaches out ahead and to the side so it is in the lower corner of the view
       g.position.set(side * (0.5 + 0.35 * amt), -0.5 + 1.0 * amt, -0.7 + 1.75 * amt);
       g.rotation.set(0.25 * amt, side * -0.25, side * -0.5 * amt);
@@ -189,12 +272,24 @@ export class Game {
     t.upc.set(0, Math.cos(camLean), 0).addScaledVector(t.rc, Math.sin(camLean));
     t.eye.set(px, b.y * 1.5 - 0.07 * b.footAmt - Math.abs(b.tip) * 0.35, pz).addScaledVector(t.upc, EYE_HEIGHT);
     t.eye.y += Math.sin(b.odo * 2.3) * 0.004 * (b.v / 20) + Math.sin(b.odo * 5.1) * 0.0025 * (b.v / 20) + b.hit * 0.03 * Math.sin(b.odo * 23);
+    if (chase) {
+      // above and behind the rider; leans a little with the bike, lags a little into turns
+      const cl = b.lean * 0.45 + b.bal * 0.6 + b.tip * 0.8;
+      t.upc.set(0, Math.cos(cl), 0).addScaledVector(t.rc, Math.sin(cl));
+      t.eye.set(px, b.y * 0.8, pz).addScaledVector(t.fc, -3.9 - b.v * 0.02).addScaledVector(t.upc, 2.6).addScaledVector(t.rc, -Math.sin(b.lean) * 0.4);
+      t.eye.y += b.hit * 0.03 * Math.sin(b.odo * 23);
+      this.camera.position.copy(t.eye);
+      this.camera.up.copy(t.upc);
+      t.tmp.set(px, b.y * 0.8 + 0.7, pz).addScaledVector(t.fc, 5);
+      this.camera.lookAt(t.tmp);
+    } else {
     this.camera.position.copy(t.eye);
     this.camera.up.copy(t.upc);
     t.tmp.copy(t.eye).addScaledVector(t.fc, 20);
     t.tmp.y -= 1.9 - b.pitch * 12;
     this.camera.lookAt(t.tmp);
-    const fov = 70 + (b.v / 24) * 9;
+    }
+    const fov = (chase ? 62 : 70) + (b.v / 24) * 9;
     if (Math.abs(fov - this.fov) > 0.05) { this.fov = fov; this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
 
     this.ground.position.set(px, -2, pz);
