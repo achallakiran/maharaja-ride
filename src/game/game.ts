@@ -34,6 +34,11 @@ export class Game {
   private readonly stream: RoadStream;
   private readonly rig = new THREE.Group();
   private readonly bars = new THREE.Group();
+  private readonly boots: THREE.Group[] = [];
+  private footPrev = false;
+  private lastFoot = 1;
+  private fallsPrev = 0;
+  private vibeAt = 0;
   private readonly ground: THREE.Mesh;
   private readonly sky: THREE.Mesh;
   private readonly sun: THREE.DirectionalLight;
@@ -106,6 +111,19 @@ export class Game {
     this.bars.add(barsMesh);
     this.rig.add(frame, this.bars);
     this.rig.matrixAutoUpdate = false;
+    // lower legs + boots that swing in when a foot goes down (index 0 = rider's left, +x)
+    const denim = new THREE.MeshLambertMaterial({ color: 0x2f4a78 }), leather = new THREE.MeshLambertMaterial({ color: 0x1b1b1d }), sole = new THREE.MeshLambertMaterial({ color: 0x3a3a3c });
+    for (const side of [1, -1]) {
+      const g = new THREE.Group();
+      const shin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.17), denim); shin.position.set(0, 0.28, 0);
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.17, 0.34), leather); boot.position.set(0, 0.02, 0.07);
+      const sl = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.04, 0.36), sole); sl.position.set(0, -0.08, 0.07);
+      g.add(shin, boot, sl);
+      g.userData.side = side;
+      g.visible = false;
+      this.rig.add(g);
+      this.boots.push(g);
+    }
   }
 
   resize(): void {
@@ -120,14 +138,20 @@ export class Game {
     this.stats.push(dt);
     this.lastInput = input;
     this.stepper.advance(dt, step => {
-      stepBike(this.bike, input, s => this.loop.kappaAt(s), this.loop.length, step, (s, d) => this.surface.sample(s, d));
+      stepBike(this.bike, input, s => this.loop.kappaAt(s), this.loop.length, step, (s, d) => { const x = this.surface.sample(s, d); return { h: x.p ?? x.h, kind: x.kind }; });
       stepEngine(this.engine, this.bike.v, input.throttle, step);
     });
     this.stream.update(this.bike.s);
     this.updatePose();
     this.audio?.update(this.engine.rpm, this.engine.load, this.bike.v, input.horn);
     this.audio?.surface(this.bike.surface, this.bike.v);
-    if (this.bike.thud > 0) { this.audio?.thud(this.bike.thud, this.bike.surface); this.bike.thud = 0; }
+    const b = this.bike;
+    if (b.thud > 0) { this.audio?.thud(b.thud, b.surface); this.buzz(Math.round(25 + b.thud * 70)); b.thud = 0; }
+    const down = b.foot !== 0 || b.footBoth;
+    if (down && !this.footPrev) { this.audio?.foot(b.surface); this.buzz(18); }
+    this.footPrev = down;
+    if (b.falls !== this.fallsPrev) { this.fallsPrev = b.falls; this.buzz(180); }
+    if (Math.abs(b.wob) > 0.15 && performance.now() - this.vibeAt > 140) { this.vibeAt = performance.now(); this.buzz(10); }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -139,19 +163,31 @@ export class Game {
     t.f.set(Math.sin(phi) * cp, sp, Math.cos(phi) * cp);
     t.r.set(-Math.cos(phi), 0, Math.sin(phi));
     // whole bike rolls with the lean...
-    t.up.set(0, Math.cos(b.lean), 0).addScaledVector(t.r, Math.sin(b.lean));
+    const lean = b.lean + b.bal + b.tip;
+    t.up.set(0, Math.cos(lean), 0).addScaledVector(t.r, Math.sin(lean));
     t.left.crossVectors(t.up, t.f);
     t.up.crossVectors(t.f, t.left);
     this.rig.matrix.makeBasis(t.left, t.up, t.f).setPosition(px, b.y, pz);
     this.rig.matrixWorldNeedsUpdate = true;
-    this.bars.rotation.y = -b.steer * 0.38;
+    this.bars.rotation.y = -(b.steer + b.wob * 0.9) * 0.38;
+    for (const g of this.boots) {
+      const side = g.userData.side as number; // +1 = left of the rider
+      const both = b.footBoth;
+      if (b.foot !== 0) this.lastFoot = b.foot;
+      const amt = b.footAmt * (both || this.lastFoot === -side ? 1 : 0);
+      g.visible = amt > 0.03;
+      const out = 0.55 + (both ? 0 : 0.1);
+      g.position.set(side * out, 0.18 - (1 - amt) * 0.7 - b.y + (b.fallT > 0 ? 0.3 : 0), 0.62 * amt - 0.7 * (1 - amt));
+      g.rotation.set(0, side * -0.12, side * -0.18 * amt);
+    }
 
     // ...the rider's head leans only half as much and looks into the turn
     const phiC = phi - clamp(b.yawRate * 0.16, -0.22, 0.22);
     t.fc.set(Math.sin(phiC), 0, Math.cos(phiC));
     t.rc.set(-Math.cos(phiC), 0, Math.sin(phiC));
-    t.upc.set(0, Math.cos(b.lean * 0.5), 0).addScaledVector(t.rc, Math.sin(b.lean * 0.5));
-    t.eye.set(px, b.y * 1.5, pz).addScaledVector(t.upc, EYE_HEIGHT);
+    const camLean = b.lean * 0.5 + b.bal * 0.7 + b.tip * 0.9 + this.lastFoot * 0.05 * b.footAmt;
+    t.upc.set(0, Math.cos(camLean), 0).addScaledVector(t.rc, Math.sin(camLean));
+    t.eye.set(px, b.y * 1.5 - 0.07 * b.footAmt - Math.abs(b.tip) * 0.35, pz).addScaledVector(t.upc, EYE_HEIGHT);
     t.eye.y += Math.sin(b.odo * 2.3) * 0.004 * (b.v / 20) + Math.sin(b.odo * 5.1) * 0.0025 * (b.v / 20) + b.hit * 0.03 * Math.sin(b.odo * 23);
     this.camera.position.copy(t.eye);
     this.camera.up.copy(t.upc);
@@ -165,6 +201,10 @@ export class Game {
     this.sky.position.copy(t.eye);
     this.sun.position.set(px - 80, 120, pz + 50);
     this.sun.target.position.set(px, 0, pz);
+  }
+
+  private buzz(ms: number): void {
+    try { if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return; navigator.vibrate?.(ms); } catch { /* not supported */ }
   }
 
   info(): RideInfo {

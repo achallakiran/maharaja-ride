@@ -11,19 +11,22 @@ export const ZONE_LEN = 400;
 const CELL = 8;
 
 export type ZoneKind = 'good' | 'broken' | 'flooded' | 'sand';
-export type SurfaceKind = 'tar' | 'broken' | 'pothole' | 'water' | 'mud' | 'sand' | 'bump' | 'shoulder';
+export type SurfaceKind = 'tar' | 'broken' | 'pothole' | 'crack' | 'water' | 'mud' | 'sand' | 'bump' | 'shoulder';
 
-export interface Hole { s: number; d: number; r: number; depth: number; water: boolean }
+export interface Hole { s: number; d: number; r: number; depth: number; water: boolean; sharp?: boolean }
 export interface Ditch { s: number; len: number; depth: number }
 export interface Breaker { s: number; len: number; height: number }
 
-export interface SurfaceSample { h: number; kind: SurfaceKind; warn?: boolean }
+/** h = what you see, p = what the wheels feel when it differs (a puddle hiding a hole). */
+export interface SurfaceSample { h: number; kind: SurfaceKind; warn?: boolean; p?: number }
+export interface Slab { s: number; len: number; d1: number; drop: number }
 
 /** Per-kind handling: extra deceleration (m/s^2), steering grip multiplier and top-speed cap (fraction of vmax). */
 export const SURFACE_FEEL: Record<SurfaceKind, { drag: number; grip: number; cap: number }> = {
   tar: { drag: 0, grip: 1, cap: 1 },
   broken: { drag: 0.4, grip: 0.95, cap: 0.55 },
   pothole: { drag: 1.5, grip: 0.85, cap: 0.5 },
+  crack: { drag: 1.2, grip: 0.8, cap: 0.5 },
   water: { drag: 2, grip: 0.7, cap: 0.4 },
   mud: { drag: 2.5, grip: 0.65, cap: 0.35 },
   sand: { drag: 1.2, grip: 0.8, cap: 0.5 },
@@ -32,10 +35,11 @@ export const SURFACE_FEEL: Record<SurfaceKind, { drag: number; grip: number; cap
 };
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
 export class RoadSurface {
   private readonly length: number;
-  private readonly cells = new Map<number, { holes: Hole[]; ditches: Ditch[]; breakers: Breaker[] }>();
+  private readonly cells = new Map<number, { holes: Hole[]; ditches: Ditch[]; breakers: Breaker[]; slabs: Slab[] }>();
 
   constructor(loop: RoadLoop) { this.length = loop.length; }
 
@@ -52,7 +56,7 @@ export class RoadSurface {
   private cell(k: number) {
     let c = this.cells.get(k);
     if (c) return c;
-    const holes: Hole[] = [], ditches: Ditch[] = [], breakers: Breaker[] = [];
+    const holes: Hole[] = [], ditches: Ditch[] = [], breakers: Breaker[] = [], slabs: Slab[] = [];
     const s0 = k * CELL, zone = this.zoneAt(s0 + CELL / 2);
     const p = zone === 'broken' ? 0.85 : zone === 'flooded' ? 0.8 : zone === 'sand' ? 0.12 : 0.05;
     for (let j = 0; j < 4; j++) {
@@ -63,7 +67,11 @@ export class RoadSurface {
     }
     if ((zone === 'flooded' && hash2(k, 31) < 0.2) || (zone === 'broken' && hash2(k, 31) < 0.1) || k === 28) ditches.push({ s: s0 + hash2(k, 32) * CELL, ...(k === 28 || hash2(k, 35) < 0.22 ? { len: 6 + hash2(k, 33) * 4, depth: 0.8 + hash2(k, 34) * 0.5 } : hash2(k, 35) < 0.45 ? { len: 9 + hash2(k, 33) * 8, depth: 0.35 + hash2(k, 34) * 0.25 } : { len: 4 + hash2(k, 33) * 6, depth: 0.16 + hash2(k, 34) * 0.14 }) });
     if (hash2(k, 41) < (zone === 'good' ? 0.018 : 0.012)) breakers.push({ s: s0 + hash2(k, 42) * CELL, len: 3.6, height: 0.09 });
-    c = { holes, ditches, breakers };
+    // sudden damage with no warning: small sharp holes (hidden under puddles when flooded) and sunken slabs with a hard edge
+    const rough = zone === 'broken' || zone === 'flooded';
+    if (rough && hash2(k, 51) < (zone === 'broken' ? 0.2 : 0.14)) holes.push({ s: s0 + hash2(k, 52) * CELL, d: -ROAD_HALF + hash2(k, 53) * 2 * ROAD_HALF, r: 0.35 + hash2(k, 54) * 0.25, depth: 0.14 + hash2(k, 55) * 0.14, water: zone === 'flooded', sharp: true });
+    if (rough && hash2(k, 61) < (zone === 'broken' ? 0.07 : 0.045)) slabs.push({ s: s0 + hash2(k, 62) * CELL, len: 10 + hash2(k, 63) * 16, d1: -2.4 + hash2(k, 64) * 4.8, drop: 0.1 + hash2(k, 65) * 0.1 });
+    c = { holes, ditches, breakers, slabs };
     this.cells.set(k, c);
     return c;
   }
@@ -88,7 +96,7 @@ export class RoadSurface {
       }
       return { h, kind };
     }
-    let h = 0, kind: SurfaceKind = 'tar', warn = false;
+    let h = 0, p = 0, kind: SurfaceKind = 'tar', warn = false;
     {
       const kw = Math.floor(sw / CELL);
       for (let k = kw; k <= kw + 1; k++) for (const dt of this.cell(k).ditches) if (dt.depth > 0.6 && sw < dt.s && sw > dt.s - 4) warn = true;
@@ -102,15 +110,16 @@ export class RoadSurface {
     }
     const k0 = Math.floor(sw / CELL);
     let water = false;
-    for (let k = k0 - 3; k <= k0 + 1; k++) {
+    for (let k = k0 - 4; k <= k0 + 1; k++) {
       const c = this.cell(k);
       for (const hole of c.holes) {
         const ds = sw - hole.s, dd = d - hole.d, t = (ds * ds + dd * dd) / (hole.r * hole.r);
         if (t >= 1) continue;
-        const bowl = -hole.depth * (1 - t);
+        const bowl = -hole.depth * (hole.sharp ? 1 - t * t : 1 - t);
         const wl = -hole.depth * 0.35;
+        p = Math.min(p, bowl);
         if (hole.water && bowl < wl) { if (wl < h || kind !== 'water') { h = Math.min(h, wl); kind = 'water'; water = true; } }
-        else if (bowl < h) { h = bowl; if (!water) kind = 'pothole'; }
+        else if (bowl < h) { h = bowl; if (!water) kind = hole.sharp ? 'crack' : 'pothole'; }
       }
       for (const dt of c.ditches) {
         const u = (sw - dt.s) / dt.len;
@@ -119,6 +128,15 @@ export class RoadSurface {
         const wl = -dt.depth * (dt.depth > 0.6 ? 0.85 : 0.45);
         if (bowl < h || bowl < wl) { h = Math.min(h, Math.max(bowl, wl)); kind = bowl < wl ? 'water' : 'pothole'; water = water || bowl < wl; }
       }
+      for (const sb of c.slabs) {
+        const u = sw - sb.s;
+        if (u < -0.2 || u > sb.len + 0.2 || d > sb.d1 + 0.3) continue;
+        const edge = smooth(clamp01((sb.d1 - d) / 0.35 + 0.5)); // hard edge along the slab's right side
+        const ends = smooth(clamp01(u / 0.3)) * smooth(clamp01((sb.len - u) / 0.3));
+        const drop = -sb.drop * edge * ends;
+        if (drop < h) { h = drop; if (kind === 'tar') kind = 'broken'; }
+        p = Math.min(p, drop);
+      }
       for (const b of c.breakers) {
         const u = (sw - b.s) / b.len;
         if (u <= 0 || u >= 1) continue;
@@ -126,7 +144,11 @@ export class RoadSurface {
         kind = 'bump';
       }
     }
-    return warn && kind === 'tar' ? { h, kind, warn } : { h, kind };
+    p = Math.min(p, h);
+    const out: SurfaceSample = { h, kind };
+    if (warn && kind === 'tar') out.warn = true;
+    if (p < h - 0.02) out.p = p;
+    return out;
   }
 
   height(s: number, d: number): number { return this.sample(s, d).h; }

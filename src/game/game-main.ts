@@ -42,12 +42,17 @@ export function runGame(): void {
   for (const ev of ['gesturestart', 'contextmenu']) document.addEventListener(ev, e => e.preventDefault());
 
   const portrait = matchMedia('(orientation: portrait) and (pointer: coarse)');
+  const warn = $('warn'), blink = $('blink');
+  blink.hidden = false;
   const spd = $('spd'), odo = $('odo'), place = $('place');
   let last = performance.now(), hudAt = 0;
   const tick = (now: number): void => {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     if (running && !portrait.matches && !document.hidden) game.frame(dt, controls.read());
+    const bk = game.bike;
+    warn.style.opacity = String(Math.max(0, (bk.danger - 0.35) / 0.65));
+    blink.style.opacity = String(bk.blink);
     if (now - hudAt > 100) {
       hudAt = now;
       const i = game.info();

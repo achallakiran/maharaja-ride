@@ -23,6 +23,7 @@
     <button id="btnBrake" aria-label="Brake"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="9"/><path d="M16 11v6m0 3v1"/></svg></button>
     <button id="btnGas" aria-label="Throttle"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 22a11 11 0 1 1 20 0M16 17l6-7M8 17h2m12 0h2M16 8v2"/><circle cx="16" cy="17" r="2"/></svg></button>
   </div>
+  <div id="warn"></div>
   <div id="speedo"><b id="spd">0</b><small>km/h</small></div>
   <div id="trip"><span id="odo">0.0 km</span><span id="place"></span></div>
   <div id="sysbtns">
@@ -30,6 +31,8 @@
     <button id="btnFs" aria-label="Fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
   </div>
 </div>
+
+<div id="blink" hidden></div>
 
 <section id="start">
   <div class="title">MAHARAJA <span>RIDE</span></div>

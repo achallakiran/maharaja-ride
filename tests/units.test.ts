@@ -490,3 +490,63 @@ test('bike: a deep ditch at speed nearly stops the bike and fires an impact', ()
   assert.ok(minV < 4.5, `slowest ${minV}`);
   assert.ok(thuds >= 1, 'impact event');
 });
+
+// ---------------------------------------------------------------- Phase 2c: balance, wobble, feet, falls
+function rideBike(start: number, secs: number, policy: (b: ReturnType<typeof newBike>) => number) {
+  const loop = bangaloreLoop(), surf = roadSurface(loop);
+  const g = (s: number, d: number) => { const x = surf.sample(s, d); return { h: x.p ?? x.h, kind: x.kind }; };
+  const b = newBike(start);
+  let maxWob = 0;
+  for (let i = 0; i < 60 * secs; i++) { stepBike(b, { ...IDLE, throttle: policy(b) }, s => loop.kappaAt(s), loop.length, 1 / 60, g); maxWob = Math.max(maxWob, Math.abs(b.wob)); }
+  return { b, maxWob };
+}
+
+test('balance: a stopped bike stays up with both feet down', () => {
+  const { b } = rideBike(1650, 10, () => 0);
+  assert.equal(b.falls, 0); assert.ok(b.footBoth); assert.ok(Math.abs(b.bal) < 0.05);
+});
+
+test('balance: a careful rider (lifts when the bars shake, stays under 40 km/h) never falls on the rough starting roads', () => {
+  let falls = 0;
+  for (const st of [150, 1300, 2300, 3000, 4100, 5200]) falls += rideBike(st, 60, b => (Math.abs(b.wob) > 0.1 || b.v > 11 ? 0 : 1)).b.falls;
+  assert.equal(falls, 0);
+});
+
+test('balance: flat-out through the rough roads wobbles hard and sometimes falls', () => {
+  let falls = 0, wob = 0;
+  for (const st of [150, 1300, 2300, 3000, 4100, 5200]) { const r = rideBike(st, 60, () => 1); falls += r.b.falls; wob = Math.max(wob, r.maxWob); }
+  assert.ok(falls >= 1 && falls <= 14, `falls ${falls}`);
+  assert.ok(wob > 0.3, `wobble ${wob}`);
+});
+
+test('falls: tip, blink, then reset upright and slow a little further on, with a grace period', () => {
+  const loop = bangaloreLoop(), surf = roadSurface(loop);
+  const g = (s: number, d: number) => { const x = surf.sample(s, d); return { h: x.p ?? x.h, kind: x.kind }; };
+  const b = newBike(2000); b.v = 14; b.wob = 0.9;
+  stepBike(b, IDLE, s => loop.kappaAt(s), loop.length, 1 / 60, g);
+  assert.ok(b.fallT > 0, 'fell');
+  let blinked = 0;
+  for (let i = 0; i < 60 * 2; i++) { stepBike(b, IDLE, s => loop.kappaAt(s), loop.length, 1 / 60, g); blinked = Math.max(blinked, b.blink); }
+  assert.ok(blinked > 0.95, 'blacked out');
+  assert.equal(b.fallT, 0); assert.ok(b.v < 0.5 && Math.abs(b.tip) < 1e-9 && b.falls === 1);
+});
+
+test('feet: a slow bike can climb out of the deepest ditch with the throttle on', () => {
+  const loop = bangaloreLoop(), surf = roadSurface(loop);
+  const g = (s: number, d: number) => { const x = surf.sample(s, d); return { h: x.p ?? x.h, kind: x.kind }; };
+  let deep = -1;
+  for (let s = 150; s < 450; s += 0.25) if (surf.height(s, 0) < -0.9) { deep = s; break; }
+  const b = newBike(deep); b.v = 1;
+  for (let i = 0; i < 60 * 15; i++) stepBike(b, { ...IDLE, throttle: 1 }, s => loop.kappaAt(s), loop.length, 1 / 60, g);
+  assert.ok(b.s > deep + 6, `got to ${b.s - deep} m past`);
+});
+
+test('surface: unmarked hazards exist (sharp holes, sunken slabs, holes hidden under puddles)', () => {
+  const loop = bangaloreLoop(), surf = roadSurface(loop);
+  const kinds = new Set<string>(); let hidden = 0, slabEdges = 0;
+  for (let s = 0; s < loop.length; s += 0.5) for (let d = -5; d <= 5; d += 0.5) {
+    const x = surf.sample(s, d); kinds.add(x.kind); if (x.p !== undefined) hidden++;
+    if (Math.abs(surf.height(s, d + 0.5) - surf.height(s, d)) > 0.08) slabEdges++;
+  }
+  assert.ok(kinds.has('crack')); assert.ok(hidden > 20, `hidden ${hidden}`); assert.ok(slabEdges > 50, `edges ${slabEdges}`);
+});

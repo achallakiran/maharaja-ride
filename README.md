@@ -36,3 +36,6 @@ First-person bike on the Utopia ↔ Aquamarine loop (left carriageway, U-turns a
 
 ## Phase 2 status: broken roads
 The loop is cut into 400 m zones: good tar, broken tar, flooded (water-filled potholes, cross-road ditches, mud shoulders) and sandy (drifts over the left lane). Speed breakers appear anywhere. The road mesh has real depth (0.5 m cells, normals from the height field) and the bike has a sprung body: bumps jolt the camera and tilt the nose, mud/sand/water slow you and cut steering grip.
+
+## Phase 2c status: balance, feet, falls
+Two-wheel contact (front-wheel kicks make the bars wobble; wobble grows at speed if you fight it), balance as an inverted pendulum held by speed above ~25 km/h and by foot dabs below, paddling out of ditches, falls with a quick blink reset, sudden unmarked damage (sharp holes, hidden under puddles when flooded, sunken slabs with hard edges), boots, camera tilt, surface sounds, a red warning vignette and Android vibration.

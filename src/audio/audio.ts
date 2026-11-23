@@ -74,7 +74,7 @@ export class RideAudio {
     if (!ctx) return;
     const t = ctx.currentTime, v = Math.min(1, speed / 14);
     const table: Record<string, [number, number]> = { // [level, filter Hz]
-      tar: [0.02, 500], broken: [0.2, 330], pothole: [0.28, 260], water: [0.34, 1500], mud: [0.34, 420], sand: [0.2, 2600], bump: [0.1, 300], shoulder: [0.22, 900],
+      tar: [0.02, 500], broken: [0.2, 330], pothole: [0.28, 260], crack: [0.26, 280], water: [0.34, 1500], mud: [0.34, 420], sand: [0.2, 2600], bump: [0.1, 300], shoulder: [0.22, 900],
     };
     const [lvl, hz] = table[kind] ?? table.tar;
     this.road.gain.gain.setTargetAtTime(lvl * (0.25 + 0.75 * v), t, 0.06);
@@ -96,6 +96,19 @@ export class RideAudio {
     const ng = ctx.createGain(); const dur = wet ? 0.7 : 0.18;
     ng.gain.setValueAtTime((wet ? 0.7 : 0.45) * st, t); ng.gain.exponentialRampToValueAtTime(0.001, t + dur);
     n.connect(f); f.connect(ng); ng.connect(this.master); n.start(t, Math.random()); n.stop(t + dur + 0.05);
+  }
+
+  /** A boot hitting the ground: scuff on hard ground, squelch / splash / crunch on soft. */
+  foot(kind: string): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const n = ctx.createBufferSource(); n.buffer = this.noise;
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass';
+    const [hz, dur, lvl] = kind === 'water' ? [1800, 0.35, 0.5] : kind === 'mud' ? [380, 0.3, 0.55] : kind === 'sand' ? [3200, 0.22, 0.35] : [1100, 0.1, 0.4];
+    f.frequency.value = hz; f.Q.value = 0.8;
+    const g = ctx.createGain(); g.gain.setValueAtTime(lvl, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    n.connect(f); f.connect(g); g.connect(this.master); n.start(t, Math.random()); n.stop(t + dur + 0.05);
   }
 
   setMuted(m: boolean): void {
