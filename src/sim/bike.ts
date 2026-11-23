@@ -31,7 +31,9 @@ export interface BikeState {
   bal: number;     // balance error: extra lean the rider is fighting, rad, + = falling right
   balV: number;
   foot: number;    // -1 / 0 / +1: which foot is down (dabbing); both feet when crawling (see footBoth)
-  footBoth: boolean;
+  footBoth: boolean; // true while walking the bike along with both feet (see walk)
+  walk: number;      // walking animation phase, rad
+  ditchLatch: boolean;
   footAmt: number; // 0..1 animation of the dab
   fallT: number;   // > 0 while falling / blinking, seconds
   fallDir: number; // side the bike goes down on
@@ -48,21 +50,22 @@ export type Ground = (s: number, d: number) => { h: number; kind: SurfaceKind };
 const FLAT: Ground = () => ({ h: 0, kind: 'tar' });
 
 export const BIKE = {
-  vmax: 21,          // m/s, about 76 km/h
-  accel: 5.4,        // m/s^2 at launch
-  brake: 10.5,
+  vmax: 18,          // m/s, about 65 km/h (Toofan's cartoon bike: lively launch, strong brakes, sheds speed fast)
+  accel: 5.5,        // m/s^2 at launch
+  brake: 14,
+  coast: 1.6,        // engine braking when you let go of the gas
   rolling: 0.18,
   drag: 0.0012,      // quadratic drag
   shoulderDrag: 3.2, // extra decel on the dirt shoulder
   shoulderStart: 5.5,
   edge: 7.6,         // hard limit left/right of the lane centre
   assist: 0.55,      // how much the bike helps follow the road (free-ride friendly on touch)
-  maxLean: 0.62,
+  maxLean: 0.7,
   maxAngle: 0.5,     // most the rider can point off the road direction while steering, rad
 } as const;
 
 export function newBike(s = 0): BikeState {
-  return { s, d: 0, psi: 0, v: 0, steer: 0, yawRate: 0, lean: 0, odo: 0, surface: 'tar', y: 0, yv: 0, pitch: 0, hit: 0, slope: 0, thud: 0, wob: 0, wobV: 0, bal: 0, balV: 0, foot: 0, footBoth: false, footAmt: 0, fallT: 0, fallDir: 1, tip: 0, blink: 0, grace: 0, falls: 0, slF: 0, danger: 0 };
+  return { s, d: 0, psi: 0, v: 0, steer: 0, yawRate: 0, lean: 0, odo: 0, surface: 'tar', y: 0, yv: 0, pitch: 0, hit: 0, slope: 0, thud: 0, wob: 0, wobV: 0, bal: 0, balV: 0, foot: 0, footBoth: false, walk: 0, ditchLatch: false, footAmt: 0, fallT: 0, fallDir: 1, tip: 0, blink: 0, grace: 0, falls: 0, slF: 0, danger: 0 };
 }
 
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
@@ -122,13 +125,13 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   const vcap = Math.max(BIKE.vmax * feel.cap * stuck, th > 0 ? 3.2 * support : 0);
   let a = th * BIKE.accel * Math.max(0, 1 - (b.v / vcap) ** 2);
   if (b.v > 0.01) {
-    a -= br * BIKE.brake + BIKE.rolling + BIKE.drag * b.v * b.v;
+    a -= br * BIKE.brake + (th < 0.15 && br === 0 ? BIKE.coast : BIKE.rolling) + BIKE.drag * b.v * b.v;
     a -= feel.drag + Math.max(0, b.v - vcap) * 1.4;
     // dropping into / climbing out of a hole costs speed at pace; slowly, it is just a hill to climb
     a -= Math.min(60, Math.abs(front.h - rear.h) / 1.4 * b.v * 7) * smoothstep(3.5, 7, b.v);
   }
   a -= clamp((front.h - rear.h) / 1.4, -1, 1) * 9.8 * 0.55;
-  if (b.foot !== 0 || b.footBoth) a += th * 4 * support * W - (br > 0 ? 0 : 0.6 * W); // paddling with the feet
+  if (b.footBoth) a += th * 4 * support * W - 0.6 * W; // walking the bike with both feet
   a -= Math.abs(b.wob) * 6 * smoothstep(0.1, 0.3, Math.abs(b.wob)) * Math.min(1, b.v / 6); // a wobbling bike scrubs speed
   b.v = Math.max(0, b.v + a * dt);
   if (br > 0 && b.v < 0.05) b.v = 0;
@@ -152,17 +155,34 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   const slip = feel.grip < 1 ? 1 - feel.grip : 0;
   b.balV += (-(gdF + gdR) * 0.5 * b.v * 1.6 + noise * slip * b.v * 1.2 + Math.sign(b.lean) * Math.max(0, Math.abs(b.lean) - 0.25) * slip * 14 * (b.v / 10)) * dt;
   if (br > 0.5 && slip > 0) b.balV += noise * br * slip * b.v * 0.9 * dt;
-  let torque = 9 * b.bal - 14 * S * b.bal - 4 * b.balV;
+  // feet: stopped = the rider's left foot is down (the usual one); crawling with the gas on = walking the bike with both feet;
+  // otherwise one foot goes down on the side the bike is falling toward.
+  const walking = th > 0.1 && b.v < 3.4;
+  const stopped = b.v < 1.2 && !walking;
   const dab = Math.abs(b.bal) > 0.1 && W > 0;
-  b.footBoth = b.v < 1.2;
-  b.foot = dab && !b.footBoth ? Math.sign(b.bal) : 0;
-  if (dab || b.footBoth) torque -= 26 * support * W * b.bal + (b.footBoth ? 12 * support * b.balV : 6 * support * W * b.balV);
+  b.footBoth = walking;
+  b.foot = walking ? 0 : stopped ? -1 : dab ? Math.sign(b.bal) : 0;
+  if (walking) b.walk += dt * (2.5 + b.v * 3);
+  const planted = walking || stopped || dab;
+  let torque = 9 * b.bal - 14 * S * b.bal - 4 * b.balV;
+  if (planted) torque -= 26 * support * W * b.bal + (walking || stopped ? 12 * support * b.balV : 6 * support * W * b.balV);
   b.balV += torque * dt;
   b.bal += b.balV * dt;
-  if (b.footBoth) b.bal *= Math.exp(-6 * dt);
-  const footTarget = b.foot !== 0 || b.footBoth ? 1 : 0;
+  if (stopped || walking) b.bal *= Math.exp(-6 * dt);
+  const footTarget = planted ? 1 : 0;
   b.footAmt += (footTarget - b.footAmt) * Math.min(1, dt * 14);
   b.danger = clamp(Math.max(Math.abs(b.bal) / 0.55, Math.abs(b.wob) / 0.75), 0, 1);
+
+  // --- a ditch or hole edge hit with the front wheel: the bike stops dead and is thrown off balance (a low-speed crawl is saved by the feet)
+  const fdrop = under.h - front.h;
+  if (fdrop > 0.07 && !b.ditchLatch && b.v > 3) {
+    b.ditchLatch = true;
+    const v0 = b.v, dir = noise >= 0 ? 1 : -1;
+    b.v = v0 * Math.max(0.2, 0.55 - v0 / 40);
+    b.bal += dir * (0.16 + 0.035 * v0);
+    b.balV += dir * v0 * 0.12;
+    b.thud = Math.max(b.thud, Math.min(1, v0 / 12));
+  } else if (fdrop < 0.03) b.ditchLatch = false;
 
   // --- falls: lost balance, tank-slapper, or dropping the front wheel into a deep hole too fast
   const sl0 = (front.h - rear.h) / 1.4;
@@ -186,8 +206,8 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   const room = into > 0 ? clamp(1 - into / BIKE.maxAngle, 0, 1) : 1;
   const target = sEff * authority * room * feel.grip + kappa * sdotPre - 0.9 * settle * b.psi * Math.min(1, b.v / 3);
   b.yawRate += (target - b.yawRate) * Math.min(1, dt * 10);
-  const leanTarget = clamp(Math.atan((b.v * b.yawRate) / 9.81), -BIKE.maxLean, BIKE.maxLean);
-  b.lean += (leanTarget - b.lean) * Math.min(1, dt * 7);
+  const leanTarget = clamp(Math.atan((b.v * b.yawRate) / 9.81) * 1.35, -BIKE.maxLean, BIKE.maxLean); // a cartoonishly big lean
+  b.lean += (leanTarget - b.lean) * Math.min(1, dt * 10);
 
   // --- kinematics in road coordinates
   const denom = Math.max(0.3, 1 - kappa * b.d);
@@ -199,7 +219,8 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   b.odo += b.v * dt;
 
   // --- suspension: body rides on a damped spring above the average wheel height
-  const wheelY = (front.h + rear.h) / 2, pitchT = Math.atan2(front.h - rear.h, 1.4);
+  const wheelie = th > 0.5 && br === 0 && b.v < 9 && b.v > 0.3 ? 0.26 * (1 - b.v / 9) * th : 0; // launch wheelie
+  const wheelY = (front.h + rear.h) / 2, pitchT = Math.atan2(front.h - rear.h, 1.4) + wheelie;
   const sl = (front.h - rear.h) / 1.4;
   if (Math.abs(sl) > 0.22 && Math.abs(b.slope) <= 0.22 && b.v > 3) {
     // dropping in (nose down) or slamming into the far wall (nose up)

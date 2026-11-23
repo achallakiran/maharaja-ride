@@ -3,7 +3,7 @@
 export class RideAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
-  private eng!: { a: OscillatorNode; b: OscillatorNode; lp: BiquadFilterNode; amp: GainNode; lfo: OscillatorNode; lfoGain: GainNode; out: GainNode };
+  private eng = { acc: 0, odd: 0, thr: 0, last: 0 };
   private wind!: { gain: GainNode; bp: BiquadFilterNode };
   private horn!: { gain: GainNode };
   private road!: { gain: GainNode; filt: BiquadFilterNode };
@@ -19,19 +19,6 @@ export class RideAudio {
     const ctx = new Ctx();
     this.ctx = ctx;
     this.master = ctx.createGain(); this.master.gain.value = this.muted ? 0 : 0.55; this.master.connect(ctx.destination);
-
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600; lp.Q.value = 1.4;
-    const amp = ctx.createGain(); amp.gain.value = 0.55;
-    const out = ctx.createGain(); out.gain.value = 0.5;
-    const a = ctx.createOscillator(); a.type = 'sawtooth'; a.frequency.value = 12;
-    const b = ctx.createOscillator(); b.type = 'square'; b.frequency.value = 24;
-    const gb = ctx.createGain(); gb.gain.value = 0.5;
-    const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 10;
-    const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.42;
-    lfo.connect(lfoGain); lfoGain.connect(amp.gain);
-    a.connect(lp); b.connect(gb); gb.connect(lp); lp.connect(amp); amp.connect(out); out.connect(this.master);
-    a.start(); b.start(); lfo.start();
-    this.eng = { a, b, lp, amp, lfo, lfoGain, out };
 
     const len = ctx.sampleRate * 2, buf = ctx.createBuffer(1, len, ctx.sampleRate), ch = buf.getChannelData(0);
     for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
@@ -57,15 +44,49 @@ export class RideAudio {
     const ctx = this.ctx;
     if (!ctx) return;
     const t = ctx.currentTime, k = 0.04;
-    const fire = rpm / 120; // single cylinder, four stroke: one power stroke every two revolutions
-    this.eng.a.frequency.setTargetAtTime(fire * 1.0, t, k);
-    this.eng.b.frequency.setTargetAtTime(fire * 2.0, t, k);
-    this.eng.lfo.frequency.setTargetAtTime(fire, t, k);
-    this.eng.lp.frequency.setTargetAtTime(260 + rpm * 0.42 + load * 500, t, k);
-    this.eng.out.gain.setTargetAtTime(0.32 + load * 0.28, t, 0.08);
+    // Royal Enfield-style single cylinder, as in Toofan: one deep pulse per power stroke, uneven like the real thing
+    const now = performance.now(), dt = Math.min(0.1, Math.max(0, (now - (this.eng.last || now)) / 1000));
+    this.eng.last = now;
+    const rn = Math.max(0, Math.min(1, rpm / 7200)), thr = Math.max(0, Math.min(1, load));
+    this.eng.acc += dt * (4.4 + rn * 17) * (0.88 + Math.random() * 0.24);
+    let n = 0;
+    while (this.eng.acc >= 1 && n++ < 3) { this.eng.acc -= 1; this.eng.odd++; this.firePulse(rn, thr, this.eng.odd % 7 === 0 ? 0.6 : 1); }
+    if (this.eng.acc > 3) this.eng.acc = 0;
+    if (this.eng.thr > 0.6 && thr < 0.1 && speed > 5 && Math.random() < 0.08) this.backfire();
+    this.eng.thr = thr;
     this.wind.gain.gain.setTargetAtTime(Math.min(0.2, (speed / 24) ** 1.6 * 0.2), t, 0.1);
     this.wind.bp.frequency.setTargetAtTime(600 + speed * 60, t, 0.1);
     this.horn.gain.gain.setTargetAtTime(horn ? 0.2 : 0, t, 0.015);
+  }
+
+  private firePulse(rn: number, thr: number, vol: number): void {
+    const ctx = this.ctx!, t = ctx.currentTime, jit = 0.82 + Math.random() * 0.36, dur = 0.16 - 0.07 * rn, f0 = 62 + rn * 38 + thr * 10;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle'; o.frequency.setValueAtTime(f0 * jit, t); o.frequency.exponentialRampToValueAtTime(f0 * 0.55, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime((0.5 + 0.35 * thr) * vol * jit, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.02);
+    const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g2 = ctx.createGain();
+    s.buffer = this.noise; s.loop = true; f.type = 'bandpass'; f.Q.value = 1.1;
+    f.frequency.setValueAtTime(260 + rn * 320 + thr * 380, t); f.frequency.exponentialRampToValueAtTime(110, t + dur * 0.8);
+    g2.gain.setValueAtTime(0.0001, t); g2.gain.exponentialRampToValueAtTime((0.16 + 0.22 * thr) * vol, t + 0.005); g2.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.8);
+    s.connect(f); f.connect(g2); g2.connect(this.master); s.start(t, Math.random() * 0.5); s.stop(t + dur);
+    // the hollow tube of the long silencer
+    const o2 = ctx.createOscillator(), g3 = ctx.createGain(), f3 = ctx.createBiquadFilter(), d3 = dur * 1.5;
+    o2.type = 'sine'; o2.frequency.setValueAtTime(f0 * 0.5 * jit, t); o2.frequency.exponentialRampToValueAtTime(f0 * 0.36, t + d3);
+    f3.type = 'lowpass'; f3.frequency.value = 220;
+    g3.gain.setValueAtTime(0.0001, t); g3.gain.exponentialRampToValueAtTime((0.55 + 0.25 * thr) * vol, t + 0.012); g3.gain.exponentialRampToValueAtTime(0.0001, t + d3);
+    o2.connect(f3); f3.connect(g3); g3.connect(this.master); o2.start(t); o2.stop(t + d3 + 0.02);
+  }
+
+  /** Pops from the exhaust when the throttle is shut at speed. */
+  private backfire(): void {
+    const ctx = this.ctx!, k = 1 + ((Math.random() * 3) | 0);
+    for (let q = 0; q < k; q++) {
+      const t = ctx.currentTime + 0.05 + q * 0.09, s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      s.buffer = this.noise; f.type = 'bandpass'; f.Q.value = 1.4; f.frequency.setValueAtTime(900 + Math.random() * 500, t); f.frequency.exponentialRampToValueAtTime(300, t + 0.05);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.4, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      s.connect(f); f.connect(g); g.connect(this.master); s.start(t, Math.random() * 0.5); s.stop(t + 0.06);
+    }
   }
 
   /** Continuous tyre-on-surface sound. */

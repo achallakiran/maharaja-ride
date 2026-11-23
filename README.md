@@ -39,3 +39,6 @@ The loop is cut into 400 m zones: good tar, broken tar, flooded (water-filled po
 
 ## Phase 2c status: balance, feet, falls
 Two-wheel contact (front-wheel kicks make the bars wobble; wobble grows at speed if you fight it), balance as an inverted pendulum held by speed above ~25 km/h and by foot dabs below, paddling out of ditches, falls with a quick blink reset, sudden unmarked damage (sharp holes, hidden under puddles when flooded, sunken slabs with hard edges), boots, camera tilt, surface sounds, a red warning vignette and Android vibration.
+
+## Toofan-style bike
+Controls and engine follow the Toofan ride mode: lively launch with a small wheelie, strong brakes, quick engine braking, cartoonishly big lean, and the Royal Enfield single-cylinder thump (irregular pulses, exhaust pops). Camera button cycles four views, far to first person. One foot goes down when stopped or leaning; both feet walk the bike at a crawl. Ditch edges stop the bike dead and usually throw it.

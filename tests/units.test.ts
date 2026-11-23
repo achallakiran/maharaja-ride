@@ -484,14 +484,14 @@ function rideBike(start: number, secs: number, policy: (b: ReturnType<typeof new
   return { b, maxWob };
 }
 
-test('balance: a stopped bike stays up with both feet down', () => {
+test('balance: a stopped bike stays up on one foot (the left)', () => {
   const { b } = rideBike(1650, 10, () => 0);
-  assert.equal(b.falls, 0); assert.ok(b.footBoth); assert.ok(Math.abs(b.bal) < 0.05);
+  assert.equal(b.falls, 0); assert.ok(!b.footBoth && b.foot === -1); assert.ok(Math.abs(b.bal) < 0.05);
 });
 
-test('balance: a careful rider (lifts when the bars shake, stays under 40 km/h) rarely falls on the rough starting roads', () => {
+test('balance: a careful rider (lifts when the bars shake, stays under 22 km/h) rarely falls on the rough starting roads', () => {
   let falls = 0;
-  for (const st of [150, 1300, 2300, 3000, 4100, 5200]) falls += rideBike(st, 60, b => (Math.abs(b.wob) > 0.1 || b.v > 11 ? 0 : 1)).b.falls;
+  for (const st of [150, 1300, 2300, 3000, 4100, 5200]) falls += rideBike(st, 60, b => (Math.abs(b.wob) > 0.1 || b.v > 6 ? 0 : 1)).b.falls;
   assert.ok(falls <= 1, `falls ${falls}`);
 });
 
@@ -539,4 +539,25 @@ test('surface: no deep or big ditches any more (largest cross-road ditch is shal
   let worst = 0;
   for (let k = 0; k * 8 < loop.length; k++) for (const d of (surf as unknown as { cell(k: number): { ditches: { depth: number }[] } }).cell(k).ditches) worst = Math.max(worst, d.depth);
   assert.ok(worst > 0 && worst < 0.3, `deepest ditch ${worst}`);
+});
+
+test('ditch: hitting a ditch edge at speed stops the bike nearly dead and usually throws it', () => {
+  const loop = bangaloreLoop();
+  const ditch = (s: number) => (s < 300 || s > 304 ? 0 : -0.16 * Math.min(1, 3 * Math.sin(Math.PI * (s - 300) / 4)));
+  const g = (s: number) => ({ h: ditch(s), kind: 'tar' as const });
+  const run = (v0: number) => {
+    const b = newBike(290); b.v = v0; let minV = 99;
+    for (let i = 0; i < 60 * 4; i++) { stepBike(b, { ...IDLE, throttle: 0.4 }, () => 0, 1e6, 1 / 60, g); minV = Math.min(minV, b.v); }
+    return { falls: b.falls, minV };
+  };
+  const fast = run(14), slow = run(4.5);
+  assert.ok(fast.falls === 1 && fast.minV < 5, `fast ${JSON.stringify(fast)}`);
+  assert.equal(slow.falls, 0);
+});
+
+test('feet: crawling with the gas on walks the bike with both feet, alternating', () => {
+  const b = newBike(300); b.v = 1.2;
+  const w0 = b.walk;
+  for (let i = 0; i < 60; i++) stepBike(b, { ...IDLE, throttle: 1 }, () => 0, 1e6, 1 / 60);
+  assert.ok(b.walk > w0 + 1, 'walk phase advances');
 });

@@ -39,8 +39,9 @@ export class Game {
   private readonly rider = new THREE.Group();
   private readonly limbs: { thigh: THREE.Mesh; shin: THREE.Mesh; boot: THREE.Mesh; side: number }[] = [];
   private readonly wheels: THREE.Mesh[] = [];
-  /** 'behind' = camera above and behind the rider so the whole bike and biker show; 'rider' = first person. */
-  view: 'behind' | 'rider' = 'behind';
+  /** Camera perspectives, from far to close: the whole bike, the bike and biker, over the shoulder, first person. */
+  static readonly VIEWS = ['far', 'mid', 'close', 'rider'] as const;
+  view: (typeof Game.VIEWS)[number] = 'mid';
   private footPrev = false;
   private lastFoot = 1;
   private fallsPrev = 0;
@@ -133,7 +134,7 @@ export class Game {
     }
   }
 
-  toggleView(): void { this.view = this.view === 'behind' ? 'rider' : 'behind'; }
+  toggleView(): void { this.view = Game.VIEWS[(Game.VIEWS.indexOf(this.view) + 1) % Game.VIEWS.length]; }
 
   private static limb(m: THREE.Mesh, a: THREE.Vector3, b: THREE.Vector3): void {
     const d = new THREE.Vector3().subVectors(b, a), len = d.length();
@@ -224,11 +225,20 @@ export class Game {
     for (const w of this.wheels) w.rotation.x = b.odo / 0.34;
     for (const l of this.limbs) {
       if (b.foot !== 0) this.lastFoot = b.foot;
-      const amt = b.footAmt * (b.footBoth || this.lastFoot === -l.side ? 1 : 0);
-      H.set(l.side * 0.2, 0.98, -0.2);
-      // riding: knee forward against the tank, boot on the peg. dabbing: the boot reaches the ground out to the side.
-      K.set(l.side * (0.27 + 0.2 * amt), 0.86 - 0.08 * amt, 0.3 + 0.1 * amt);
-      F.set(l.side * (0.27 + 0.45 * amt), 0.3 * (1 - amt) - b.y * amt, 0.0 + 0.22 * amt);
+      const walking = b.footBoth, one = this.lastFoot === -l.side;
+      const amt = b.footAmt * (walking || one ? 1 : 0);
+      H.set(l.side * 0.17, 0.98, -0.2);
+      // riding: knee against the tank, boot on the peg. one foot down: that boot reaches the ground just outside the bike.
+      // walking: both feet scuff the ground, one forward while the other pushes back.
+      K.set(l.side * (0.2 + 0.07 * amt), 0.86 - 0.08 * amt, 0.3 + 0.1 * amt);
+      const ground = -b.y;
+      let fx = 0.2 + 0.14 * amt, fy = 0.3 * (1 - amt) + ground * amt, fz = 0.22 * amt;
+      if (walking) {
+        const ph = b.walk + (l.side > 0 ? 0 : Math.PI);
+        fz = 0.05 + 0.4 * Math.sin(ph);
+        fy = ground + Math.max(0, Math.cos(ph)) * 0.16; // the swinging foot lifts
+      }
+      F.set(l.side * fx, fy, fz);
       Game.limb(l.thigh, H, K); Game.limb(l.shin, K, F);
       l.boot.position.set(F.x, F.y + 0.02, F.z + 0.1);
     }
@@ -250,7 +260,7 @@ export class Game {
     this.rig.matrix.makeBasis(t.left, t.up, t.f).setPosition(px, b.y, pz);
     this.rig.matrixWorldNeedsUpdate = true;
     this.bars.rotation.y = -(b.steer + b.wob * 0.9) * 0.38;
-    const chase = this.view === 'behind';
+    const chase = this.view !== 'rider';
     this.bikeBody.visible = this.rider.visible = chase;
     if (chase) this.poseRider();
     for (const g of this.boots) {
@@ -274,13 +284,14 @@ export class Game {
     t.eye.y += Math.sin(b.odo * 2.3) * 0.004 * (b.v / 20) + Math.sin(b.odo * 5.1) * 0.0025 * (b.v / 20) + b.hit * 0.03 * Math.sin(b.odo * 23);
     if (chase) {
       // above and behind the rider; leans a little with the bike, lags a little into turns
+      const cam = { far: { back: 3.9, up: 2.6, look: 0.7, ahead: 5 }, mid: { back: 2.6, up: 1.95, look: 0.9, ahead: 5 }, close: { back: 1.8, up: 1.9, look: 1.0, ahead: 5 } }[this.view as 'far' | 'mid' | 'close'];
       const cl = b.lean * 0.45 + b.bal * 0.6 + b.tip * 0.8;
       t.upc.set(0, Math.cos(cl), 0).addScaledVector(t.rc, Math.sin(cl));
-      t.eye.set(px, b.y * 0.8, pz).addScaledVector(t.fc, -3.9 - b.v * 0.02).addScaledVector(t.upc, 2.6).addScaledVector(t.rc, -Math.sin(b.lean) * 0.4);
+      t.eye.set(px, b.y * 0.8, pz).addScaledVector(t.fc, -cam.back - b.v * 0.015).addScaledVector(t.upc, cam.up).addScaledVector(t.rc, -Math.sin(b.lean) * 0.4);
       t.eye.y += b.hit * 0.03 * Math.sin(b.odo * 23);
       this.camera.position.copy(t.eye);
       this.camera.up.copy(t.upc);
-      t.tmp.set(px, b.y * 0.8 + 0.7, pz).addScaledVector(t.fc, 5);
+      t.tmp.set(px, b.y * 0.8 + cam.look, pz).addScaledVector(t.fc, cam.ahead);
       this.camera.lookAt(t.tmp);
     } else {
     this.camera.position.copy(t.eye);
