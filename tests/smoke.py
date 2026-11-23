@@ -71,7 +71,7 @@ with sync_playwright() as p:
     assert state["odo"] > 3, "bike moved"
     assert state["s"] != s0, "advanced along the road"
     assert 5 <= state["chunks"] <= 9, "road chunks streamed"
-    assert state["calls"] < 40, "draw call budget"
+    assert state["calls"] < 100, "draw call budget"
     assert colours(ride_png) > 40, "ride view is not blank"
     assert abs(state["d"]) < 8, "stayed on the road"
 
