@@ -17,7 +17,7 @@ export interface Hole { s: number; d: number; r: number; depth: number; water: b
 export interface Ditch { s: number; len: number; depth: number }
 export interface Breaker { s: number; len: number; height: number }
 
-export interface SurfaceSample { h: number; kind: SurfaceKind }
+export interface SurfaceSample { h: number; kind: SurfaceKind; warn?: boolean }
 
 /** Per-kind handling: extra deceleration (m/s^2), steering grip multiplier and top-speed cap (fraction of vmax). */
 export const SURFACE_FEEL: Record<SurfaceKind, { drag: number; grip: number; cap: number }> = {
@@ -61,7 +61,7 @@ export class RoadSurface {
       const a = hash2(k * 7 + j, 22), b = hash2(k * 7 + j, 23), c2 = hash2(k * 7 + j, 24);
       holes.push({ s: s0 + a * CELL, d: -ROAD_HALF + b * 2 * ROAD_HALF, r: 0.7 + c2 * 1.1, depth: 0.09 + hash2(k * 7 + j, 25) * 0.17, water: zone === 'flooded' });
     }
-    if ((zone === 'flooded' && hash2(k, 31) < 0.2) || (zone === 'broken' && hash2(k, 31) < 0.06)) ditches.push({ s: s0 + hash2(k, 32) * CELL, ...(hash2(k, 35) < 0.12 ? { len: 6 + hash2(k, 33) * 4, depth: 0.8 + hash2(k, 34) * 0.5 } : hash2(k, 35) < 0.45 ? { len: 9 + hash2(k, 33) * 8, depth: 0.35 + hash2(k, 34) * 0.25 } : { len: 4 + hash2(k, 33) * 6, depth: 0.16 + hash2(k, 34) * 0.14 }) });
+    if ((zone === 'flooded' && hash2(k, 31) < 0.2) || (zone === 'broken' && hash2(k, 31) < 0.1) || k === 28) ditches.push({ s: s0 + hash2(k, 32) * CELL, ...(k === 28 || hash2(k, 35) < 0.22 ? { len: 6 + hash2(k, 33) * 4, depth: 0.8 + hash2(k, 34) * 0.5 } : hash2(k, 35) < 0.45 ? { len: 9 + hash2(k, 33) * 8, depth: 0.35 + hash2(k, 34) * 0.25 } : { len: 4 + hash2(k, 33) * 6, depth: 0.16 + hash2(k, 34) * 0.14 }) });
     if (hash2(k, 41) < (zone === 'good' ? 0.018 : 0.012)) breakers.push({ s: s0 + hash2(k, 42) * CELL, len: 3.6, height: 0.09 });
     c = { holes, ditches, breakers };
     this.cells.set(k, c);
@@ -79,7 +79,7 @@ export class RoadSurface {
       const fade = Math.max(0, 1 - (Math.abs(d) - ROAD_HALF) / 2.75);
       if (fade > 0) {
         const k0 = Math.floor(sw / CELL);
-        for (let k = k0 - 1; k <= k0 + 1; k++) for (const dt of this.cell(k).ditches) {
+        for (let k = k0 - 3; k <= k0 + 1; k++) for (const dt of this.cell(k).ditches) {
           const u = (sw - dt.s) / dt.len;
           if (u <= 0 || u >= 1) continue;
           const bowl = -dt.depth * Math.min(1, 1.5 * Math.sin(Math.PI * u)) * fade;
@@ -88,7 +88,11 @@ export class RoadSurface {
       }
       return { h, kind };
     }
-    let h = 0, kind: SurfaceKind = 'tar';
+    let h = 0, kind: SurfaceKind = 'tar', warn = false;
+    {
+      const kw = Math.floor(sw / CELL);
+      for (let k = kw; k <= kw + 1; k++) for (const dt of this.cell(k).ditches) if (dt.depth > 0.6 && sw < dt.s && sw > dt.s - 4) warn = true;
+    }
     if (zone === 'broken' || zone === 'flooded') {
       const n = hash2(Math.floor(sw / 1.5), Math.floor((d + 9) / 1.5) + 70);
       if (n < (zone === 'broken' ? 0.55 : 0.4)) { kind = 'broken'; h = -0.045 * hash2(Math.floor(sw / 0.5), Math.floor((d + 9) / 0.5) + 300); }
@@ -98,7 +102,7 @@ export class RoadSurface {
     }
     const k0 = Math.floor(sw / CELL);
     let water = false;
-    for (let k = k0 - 1; k <= k0 + 1; k++) {
+    for (let k = k0 - 3; k <= k0 + 1; k++) {
       const c = this.cell(k);
       for (const hole of c.holes) {
         const ds = sw - hole.s, dd = d - hole.d, t = (ds * ds + dd * dd) / (hole.r * hole.r);
@@ -112,7 +116,7 @@ export class RoadSurface {
         const u = (sw - dt.s) / dt.len;
         if (u <= 0 || u >= 1) continue;
         const bowl = -dt.depth * Math.min(1, 1.5 * Math.sin(Math.PI * u));
-        const wl = -dt.depth * 0.45;
+        const wl = -dt.depth * (dt.depth > 0.6 ? 0.85 : 0.45);
         if (bowl < h || bowl < wl) { h = Math.min(h, Math.max(bowl, wl)); kind = bowl < wl ? 'water' : 'pothole'; water = water || bowl < wl; }
       }
       for (const b of c.breakers) {
@@ -122,7 +126,7 @@ export class RoadSurface {
         kind = 'bump';
       }
     }
-    return { h, kind };
+    return warn && kind === 'tar' ? { h, kind, warn } : { h, kind };
   }
 
   height(s: number, d: number): number { return this.sample(s, d).h; }

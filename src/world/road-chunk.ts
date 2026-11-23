@@ -63,6 +63,7 @@ export function buildRoadChunk(loop: RoadLoop, c: number): MeshData {
       if (cl.kind === 'tar' || cl.kind === 'shoulder') {
         const o = KIND_HEX[mid.kind];
         if (o !== undefined) { hex = o; jitter = mid.kind === 'sand' ? 0.07 : 0.1; }
+        else if (mid.warn) hex = Math.floor(sm / ROW) % 2 === 0 ? 0xc8402c : 0xe8e4d8;
         else if (mid.kind === 'bump') hex = Math.floor(sm / ROW) % 2 === 0 ? BUMP_A : BUMP_B;
       } else if (mid.kind === 'water') hex = KIND_HEX.water!;
       else if (mid.kind === 'sand' && cl.kind !== 'edge') hex = KIND_HEX.sand!;

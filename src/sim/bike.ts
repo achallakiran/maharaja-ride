@@ -23,6 +23,8 @@ export interface BikeState {
   yv: number;      // its vertical speed
   pitch: number;   // rad, + = nose up
   hit: number;     // 0..1 how hard the last bump was (for sound / shake)
+  slope: number;   // road slope under the wheels last step
+  thud: number;    // one-shot impact strength 0..1; the game reads it (for sound) and clears it
 }
 
 /** Road under the wheels: height and material at (s, d). */
@@ -44,7 +46,7 @@ export const BIKE = {
 } as const;
 
 export function newBike(s = 0): BikeState {
-  return { s, d: 0, psi: 0, v: 0, steer: 0, yawRate: 0, lean: 0, odo: 0, surface: 'tar', y: 0, yv: 0, pitch: 0, hit: 0 };
+  return { s, d: 0, psi: 0, v: 0, steer: 0, yawRate: 0, lean: 0, odo: 0, surface: 'tar', y: 0, yv: 0, pitch: 0, hit: 0, slope: 0, thud: 0 };
 }
 
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
@@ -57,13 +59,14 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
   const feel = SURFACE_FEEL[b.surface];
 
   // --- speed
-  const vcap = BIKE.vmax * feel.cap;
+  const stuck = under.h < -0.3 ? 0.35 : 1; // deep in a trench: barely able to climb out
+  const vcap = BIKE.vmax * feel.cap * stuck;
   let a = th * BIKE.accel * Math.max(0, 1 - (b.v / vcap) ** 2);
   if (b.v > 0.01) {
     a -= br * BIKE.brake + BIKE.rolling + BIKE.drag * b.v * b.v;
     a -= feel.drag + Math.max(0, b.v - vcap) * 1.4;
     // dropping into / climbing out of a hole costs speed
-    a -= Math.min(22, Math.abs(front.h - rear.h) / 1.4 * b.v * 4);
+    a -= Math.min(60, Math.abs(front.h - rear.h) / 1.4 * b.v * 7);
   }
   b.v = Math.max(0, b.v + a * dt);
   if (br > 0 && b.v < 0.05) b.v = 0;
@@ -96,12 +99,21 @@ export function stepBike(b: BikeState, input: BikeInput, kappaAt: (s: number) =>
 
   // --- suspension: body rides on a damped spring above the average wheel height
   const wheelY = (front.h + rear.h) / 2, pitchT = Math.atan2(front.h - rear.h, 1.4);
+  const sl = (front.h - rear.h) / 1.4;
+  if (Math.abs(sl) > 0.22 && Math.abs(b.slope) <= 0.22 && b.v > 3) {
+    // dropping in (nose down) or slamming into the far wall (nose up)
+    const power = Math.min(1, b.v / 12) * Math.min(1.6, Math.abs(sl) * 3.2);
+    b.yv += (sl < 0 ? -1.4 : -2.2) * power;
+    b.thud = Math.max(b.thud, Math.min(1, power));
+    if (sl > 0) b.v *= 1 - Math.min(0.5, power * 0.35);
+  }
+  b.slope = sl;
   const k = 190, cd = 26;
   const acc = -k * (b.y - wheelY) - cd * b.yv;
   b.yv += acc * dt;
   b.y += b.yv * dt;
   b.pitch += (pitchT - b.pitch) * Math.min(1, dt * 14);
-  b.hit = Math.max(Math.min(1, Math.abs(acc) / 90), b.hit * Math.exp(-6 * dt));
+  b.hit = Math.max(Math.min(1, Math.abs(acc) / 90), b.thud, b.hit * Math.exp(-6 * dt));
 
   // --- road edge: stop at the limit and scrub speed
   if (Math.abs(b.d) > BIKE.edge) {

@@ -126,6 +126,8 @@ export class Game {
     this.stream.update(this.bike.s);
     this.updatePose();
     this.audio?.update(this.engine.rpm, this.engine.load, this.bike.v, input.horn);
+    this.audio?.surface(this.bike.surface, this.bike.v);
+    if (this.bike.thud > 0) { this.audio?.thud(this.bike.thud, this.bike.surface); this.bike.thud = 0; }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -149,7 +151,7 @@ export class Game {
     t.fc.set(Math.sin(phiC), 0, Math.cos(phiC));
     t.rc.set(-Math.cos(phiC), 0, Math.sin(phiC));
     t.upc.set(0, Math.cos(b.lean * 0.5), 0).addScaledVector(t.rc, Math.sin(b.lean * 0.5));
-    t.eye.set(px, b.y, pz).addScaledVector(t.upc, EYE_HEIGHT);
+    t.eye.set(px, b.y * 1.5, pz).addScaledVector(t.upc, EYE_HEIGHT);
     t.eye.y += Math.sin(b.odo * 2.3) * 0.004 * (b.v / 20) + Math.sin(b.odo * 5.1) * 0.0025 * (b.v / 20) + b.hit * 0.03 * Math.sin(b.odo * 23);
     this.camera.position.copy(t.eye);
     this.camera.up.copy(t.upc);

@@ -446,7 +446,7 @@ test('surface: smooth enough to ride (no cliffs between neighbouring samples)', 
   const loop = bangaloreLoop(), a = roadSurface(loop);
   let worst = 0;
   for (let s = 100; s < 6000; s += 0.25) for (let d = -5; d <= 5; d += 0.5) worst = Math.max(worst, Math.abs(a.height(s + 0.25, d) - a.height(s, d)));
-  assert.ok(worst < 0.26, `step ${worst}`);
+  assert.ok(worst < 0.55, `step ${worst}`);
 });
 
 test('bike: potholes and breakers move the suspension and cost speed', () => {
@@ -459,7 +459,7 @@ test('bike: potholes and breakers move the suspension and cost speed', () => {
   let amp = 0;
   for (let i = 0; i < 60 * 5; i++) { stepBike(b, { ...IDLE, throttle: 0.5 }, s => loop.kappaAt(s), loop.length, 1 / 60, (s, d) => surf.sample(s, d)); amp = Math.max(amp, Math.abs(b.y)); }
   assert.ok(amp > 0.03 && amp < 1.6, `suspension travel ${amp}`);
-  assert.ok(Number.isFinite(b.y) && Math.abs(b.y) < 0.4, 'stays bounded');
+  assert.ok(Number.isFinite(b.y) && Math.abs(b.y) < 2, 'stays bounded');
 });
 
 test('bike: mud, water and sand cap the top speed well below tar', () => {
@@ -470,4 +470,23 @@ test('bike: mud, water and sand cap the top speed well below tar', () => {
   };
   const tar = run('tar'), mud = run('mud'), water = run('water'), sand = run('sand');
   assert.ok(tar > 0.9 * BIKE.vmax && mud < 0.5 * tar && water < 0.55 * tar && sand < 0.65 * tar, `${tar} ${mud} ${water} ${sand}`);
+});
+
+test('surface: a deep ditch lies within the first 300 m of the ride, and warning stripes precede it', () => {
+  const loop = bangaloreLoop(), surf = roadSurface(loop);
+  let deepAt = -1, warnAt = -1;
+  for (let s = 150; s < 450; s += 0.25) { if (deepAt < 0 && surf.height(s, 0) < -0.6) deepAt = s; if (warnAt < 0 && surf.sample(s, 0).warn) warnAt = s; }
+  assert.ok(deepAt > 150 && deepAt < 300, `deep ditch at ${deepAt}`);
+  assert.ok(warnAt > 0 && warnAt < deepAt, `warning at ${warnAt}`);
+});
+
+test('bike: a deep ditch at speed nearly stops the bike and fires an impact', () => {
+  const loop = bangaloreLoop(), surf = roadSurface(loop);
+  let deepAt = -1;
+  for (let s = 150; s < 450; s += 0.25) if (surf.height(s, 0) < -0.6) { deepAt = s; break; }
+  const b = newBike(deepAt - 30); b.v = 12;
+  let minV = 99, thuds = 0;
+  for (let i = 0; i < 60 * 8; i++) { stepBike(b, { ...IDLE, throttle: 1 }, s => loop.kappaAt(s), loop.length, 1 / 60, (s, d) => surf.sample(s, d)); minV = Math.min(minV, b.v); if (b.thud > 0) { thuds++; b.thud = 0; } }
+  assert.ok(minV < 4.5, `slowest ${minV}`);
+  assert.ok(thuds >= 1, 'impact event');
 });

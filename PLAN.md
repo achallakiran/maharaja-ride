@@ -13,6 +13,7 @@ First-person voxel bike ride through Bangalore peak traffic. Free ride on a loop
 0. **Foundation + perf spike** (this push): scaffold, tests, Pages deploy, 8-type voxel vehicle kit, instanced fleet, on-screen perf readout.
 1. **Ride the empty loop**: road ribbon from the route polyline (A out, B back), chunk streaming, arcade bike physics, first-person cockpit (handlebar, mirrors, lean), joystick + throttle/brake + horn, landscape + fullscreen, basic engine sound.
 2. **Broken roads**: per-cell height/depth field (potholes, ditches, speed breakers, patches); surface types (tar, broken, mud, sand); suspension bumps and camera shake.
+2b. **Hazards you can feel** (user feedback after Phase 2): deep ditches every ~150-250 m in broken/flooded zones with one inside the first 100 m; hitting a ditch or hole is an event (hard speed loss, camera slam, throttle weak while stuck in deep water); warning stripes before deep ditches; surface sound (thud on holes, splash in water, squelch in mud, hiss in sand, rumble on broken tar). Falls and crashes wait for Phase 4.
 3. **Static Bangalore**: voxel buildings, flyovers, medians, footpaths, trees, signboards, parked vehicles as face-culled chunk meshes; sky, fog, baked AO.
 4. **Traffic v1**: the 8 vehicle types with LOD, spawn/despawn ring around the rider, lane-following, bike collisions (slow bump vs fall and recover).
 5. **Cut-throat traffic**: lane-less gap seeking, cut-ins, horns, jam waves, denser junction zones, bike filtering with mirror-scrape feedback.
